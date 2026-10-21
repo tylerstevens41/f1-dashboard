@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <circle cx="250" cy="250" r="220" fill="#000000" />
+  <circle cx="250" cy="250" r="175" fill="none" stroke="#00a650" stroke-width="32" stroke-dasharray="397 152.7 397 152.7" transform="rotate(-65 250 250)" stroke-linecap="butt" />
+  <text x="250" y="250" text-anchor="middle" dy="0.35em" fill="#ffffff" style="font-family: 'Arial Black', 'Impact', sans-serif; font-weight: 900; font-size: 240px;">I</text>
+</svg>

@@ -1,0 +1,572 @@
+
+/* ==========================================
+   F1 RACE TIMING TOWER
+   ========================================== */
+
+.f1-timing-tower {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #111318;
+  color: #f5f5f5;
+  border-right: 1px solid #30343d;
+}
+
+.f1-timing-tower .timing-tower-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  padding: 12px 10px;
+  background: #171a21;
+  border-bottom: 1px solid #30343d;
+}
+
+.f1-timing-tower .timing-tower-title h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+}
+
+.f1-timing-tower .timing-tower-title > span {
+  color: #ff3434;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* All seven columns share the same widths */
+
+.f1-timing-head,
+.f1-timing-row {
+  display: grid;
+  grid-template-columns:
+    24px
+    minmax(52px, 0.85fr)
+    minmax(45px, 0.8fr)
+    30px
+    minmax(65px, 1fr)
+    minmax(48px, 0.85fr)
+    minmax(65px, 1fr);
+  align-items: center;
+  column-gap: 4px;
+}
+
+.f1-timing-head {
+  flex: 0 0 auto;
+  padding: 9px 8px;
+  background: #20242c;
+  border-bottom: 1px solid #353a44;
+  color: #aeb4c0;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.15px;
+  white-space: nowrap;
+}
+
+.f1-timing-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.f1-timing-row {
+  flex: 1 1 0;
+  width: 100%;
+  min-height: 0;
+  padding: 2px 8px;
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid #272b33;
+  border-radius: 0;
+  background: #15181e;
+  color: #f5f5f5;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.f1-timing-row:nth-child(even) {
+  background: #1a1d24;
+}
+
+.f1-timing-row:hover {
+  background: #303640;
+}
+
+.f1-timing-row.selected {
+  background: #333b49;
+  box-shadow: inset 3px 0 #e10600;
+}
+
+.f1-position {
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.f1-driver-cell {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.f1-driver-cell strong {
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.f1-team-colour {
+  display: block;
+  flex: 0 0 3px;
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+}
+
+.f1-number {
+  min-width: 0;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.f1-tyre-cell {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* F1-style outlined tyre compound symbols */
+
+.f1-tyre {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border: 3px solid #737373;
+  border-radius: 50%;
+  color: #aaa;
+  background: #14161a;
+  box-sizing: border-box;
+}
+
+.f1-tyre > span {
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.f1-tyre.tyre-soft {
+  border-color: #f12735;
+  color: #f12735;
+}
+
+.f1-tyre.tyre-medium {
+  border-color: #f5d329;
+  color: #f5d329;
+}
+
+.f1-tyre.tyre-hard {
+  border-color: #f1f1f1;
+  color: #f1f1f1;
+}
+
+.f1-tyre.tyre-intermediate {
+  border-color: #27ba5d;
+  color: #27ba5d;
+}
+
+.f1-tyre.tyre-wet {
+  border-color: #2785f6;
+  color: #2785f6;
+}
+
+.f1-timing-tower .timing-tower-bottom {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border-top: 1px solid #30343d;
+  color: #8c939e;
+  background: #171a21;
+  font-size: 9px;
+  text-align: center;
+  letter-spacing: 0.5px;
+}
+
+.f1-timing-tower .timing-message {
+  padding: 12px;
+  color: #aeb4c0;
+  font-size: 12px;
+}
+
+/* Compact fixed-display sizing */
+
+@media (max-height: 800px) {
+  .f1-timing-tower .timing-tower-title {
+    padding: 8px;
+  }
+
+  .f1-timing-head {
+    padding: 6px;
+  }
+
+  .f1-timing-row {
+    padding: 1px 6px;
+  }
+
+  .f1-timing-tower .timing-tower-bottom {
+    padding: 5px;
+  }
+
+  .f1-tyre {
+    width: 18px;
+    height: 18px;
+    flex-basis: 18px;
+    border-width: 2px;
+  }
+
+  .f1-tyre > span {
+    font-size: 9px;
+  }
+}
+/* Compact timing tower for a fixed display */
+
+.f1-timing-tower .timing-tower-title {
+  padding: 6px 8px;
+}
+
+.f1-timing-head {
+  padding: 5px 6px;
+}
+
+.f1-timing-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.f1-timing-row {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 0 5px;
+}
+
+.f1-timing-tower .timing-tower-bottom {
+  display: none;
+}
+.f1-tyre-image {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  display: block;
+}
+
+/* ========================================
+   FIT UP TO 22 DRIVERS WITHOUT SCROLLING
+   ======================================== */
+
+.f1-timing-tower {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.f1-timing-tower .timing-tower-title {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+}
+
+.f1-timing-head {
+  flex: 0 0 auto;
+  padding: 5px 6px;
+}
+
+.f1-timing-body {
+  flex: 1 1 0;
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.f1-timing-row {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0 5px;
+  margin: 0;
+  border-radius: 0;
+}
+
+/* Save space by removing the bottom message */
+
+.f1-timing-tower .timing-tower-bottom {
+  display: none;
+}
+
+/* Seven responsive timing columns */
+
+.f1-timing-head,
+.f1-timing-row {
+  grid-template-columns:
+    22px
+    minmax(44px, 0.8fr)
+    minmax(42px, 0.8fr)
+    26px
+    minmax(61px, 1fr)
+    minmax(47px, 0.9fr)
+    minmax(61px, 1fr);
+  column-gap: 3px;
+}
+
+.f1-position {
+  font-size: clamp(9px, 0.8vw, 12px);
+}
+
+.f1-driver-cell strong {
+  font-size: clamp(9px, 0.8vw, 11px);
+}
+
+.f1-number {
+  font-size: clamp(8px, 0.7vw, 11px);
+}
+
+.f1-timing-head {
+  font-size: clamp(7px, 0.6vw, 9px);
+}
+
+.f1-tyre,
+.f1-tyre-image {
+  width: clamp(14px, 1.5vw, 22px);
+  height: clamp(14px, 1.5vw, 22px);
+  flex-basis: auto;
+}
+
+.f1-tyre {
+  border-width: 2px;
+}
+
+.f1-tyre > span {
+  font-size: clamp(8px, 0.75vw, 11px);
+}
+
+/* Extra-compact mode for smaller displays */
+
+@media (max-height: 750px) {
+  .f1-timing-tower .timing-tower-title {
+    padding: 4px 6px;
+  }
+
+  .f1-timing-tower .timing-tower-title h3 {
+    font-size: 11px;
+  }
+
+  .f1-timing-head {
+    padding: 4px 5px;
+  }
+
+  .f1-timing-row {
+    padding: 0 4px;
+  }
+
+  .f1-team-colour {
+    height: 12px;
+  }
+}
+.f1-position-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  background: #303640;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.f1-position-badge.leader {
+  background: #e10600;
+}
+
+/* ========================================
+   2026 GRID: 22 DRIVERS + TEAM LOGOS
+   ======================================== */
+
+.f1-timing-head,
+.f1-timing-row {
+  grid-template-columns:
+    24px
+    minmax(82px, 1.25fr)
+    minmax(42px, 0.8fr)
+    26px
+    minmax(61px, 1fr)
+    minmax(48px, 0.9fr)
+    minmax(61px, 1fr);
+  column-gap: 3px;
+}
+
+.f1-position-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  border-radius: 3px;
+  background: #303640;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.f1-position-badge.leader {
+  background: #e10600;
+}
+
+.f1-driver-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.f1-team-colour {
+  flex: 0 0 3px;
+}
+
+.f1-team-logo {
+  width: 22px;
+  height: 18px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.f1-driver-cell strong {
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.f1-timing-body {
+  flex: 1 1 0;
+  display: grid;
+  grid-auto-rows: minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.f1-timing-row {
+  height: 100%;
+  min-height: 0;
+  padding: 0 5px;
+}
+
+.f1-timing-tower .timing-tower-bottom {
+  display: none;
+}
+
+@media (max-height: 850px) {
+  .f1-position-badge {
+    height: 16px;
+    font-size: 9px;
+  }
+
+  .f1-team-logo {
+    width: 18px;
+    height: 15px;
+  }
+
+  .f1-tyre {
+    width: 16px;
+    height: 16px;
+    flex-basis: 16px;
+    border-width: 2px;
+  }
+
+  .f1-tyre > span {
+    font-size: 9px;
+  }
+
+  .f1-number {
+    font-size: 9px;
+  }
+}
+
+
+/* SVG tyre icons */
+
+.f1-tyre-image {
+  display: block;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+@media (max-height: 850px) {
+  .f1-tyre-image {
+    width: 17px;
+    height: 17px;
+  }
+}
+
+/* ========================================
+   RETIRED / CRASHED-OUT DRIVERS
+   ======================================== */
+
+.f1-timing-row.driver-out {
+  background: rgba(80, 85, 95, 0.12);
+}
+
+.f1-timing-row.driver-out .f1-driver-cell,
+.f1-timing-row.driver-out .f1-position-badge,
+.f1-timing-row.driver-out .f1-tyre-cell,
+.f1-timing-row.driver-out .f1-number:not(.f1-out-label) {
+  opacity: 0.35;
+  filter: grayscale(1);
+}
+
+.f1-timing-row.driver-out .f1-team-colour {
+  background: #666 !important;
+}
+
+.f1-timing-row.driver-out .f1-team-logo {
+  filter: grayscale(1);
+}
+
+.f1-timing-row .f1-out-label {
+  color: #ff4545;
+  font-weight: 900;
+  opacity: 1;
+  letter-spacing: 0.4px;
+}
+
+/* ========================================
+   PIT STATUS
+   ======================================== */
+
+.f1-timing-row .f1-pit-label {
+  color: #ffd43b;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+}

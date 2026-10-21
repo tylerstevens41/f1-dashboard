@@ -1,0 +1,338 @@
+
+.live-race-page {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: white;
+}
+
+.live-race-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.live-race-header h2 {
+  font-size: 22px;
+  margin: 0;
+}
+
+.live-race-header p {
+  color: #999;
+  font-size: 11px;
+  margin: 6px 0 0;
+}
+
+.replay-badge {
+  color: #ff4545;
+  border: 1px solid #ff4545;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 10px;
+}
+
+.live-circuit-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #16181d;
+  border: 1px solid #30333b;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.live-circuit-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #30333b;
+}
+
+.live-circuit-heading h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.live-circuit-heading span {
+  color: #999;
+  font-size: 10px;
+}
+
+/* TIMING TOWER + CIRCUIT LAYOUT */
+
+.live-race-content {
+  display: grid;
+  grid-template-columns:
+    minmax(285px, 32%)
+    minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  gap: 12px;
+  padding: 12px;
+}
+
+/* CIRCUIT */
+
+.live-circuit-area {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: radial-gradient(
+    circle,
+    #222630 0%,
+    #101116 75%
+  );
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.live-track-svg {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+}
+
+.track-outline {
+  fill: none;
+  stroke: #555a64;
+  stroke-width: 200;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.track-center {
+  fill: none;
+  stroke: #f2f2f2;
+  stroke-width: 85;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.live-error {
+  color: #ff6868;
+}
+
+/* REPLAY CONTROLS */
+
+.replay-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 12px;
+  border-top: 1px solid #30333b;
+}
+
+.replay-controls button {
+  background: #e10600;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 20px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.replay-controls button:hover {
+  background: #ff2424;
+}
+
+.replay-controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.replay-speed {
+  background: #252830;
+  color: #ffffff;
+  border: 1px solid #454954;
+  border-radius: 6px;
+  padding: 9px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.replay-clock {
+  color: #ffffff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* FOOTER */
+
+.live-circuit-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-top: 1px solid #30333b;
+  color: #999;
+  font-size: 10px;
+}
+
+/* Full-race playback timeline */
+
+.race-timeline {
+  padding: 10px 22px 16px;
+  background: #111318;
+}
+
+.race-timeline input[type="range"] {
+  width: 100%;
+  cursor: pointer;
+  accent-color: #e10600;
+}
+
+.race-timeline input[type="range"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.race-timeline-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  color: #a0a3ab;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.replay-clock {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Allow the race timing tower to use the available height */
+
+.live-race-page {
+  min-height: 0;
+}
+
+.live-circuit-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.live-race-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.live-race-content .f1-timing-tower {
+  height: 100%;
+  min-height: 0;
+}
+
+/* ========================================
+   RESPONSIVE RACE CENTER LAYOUT
+   ======================================== */
+
+.live-race-page {
+  height: 100dvh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.live-race-header {
+  flex: 0 0 auto;
+}
+
+.live-circuit-panel {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.live-circuit-heading,
+.replay-controls,
+.race-timeline,
+.live-circuit-footer {
+  flex: 0 0 auto;
+}
+
+.live-race-content {
+  flex: 1 1 0;
+  display: grid;
+  grid-template-columns:
+    minmax(390px, 43%)
+    minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  align-items: stretch;
+}
+
+.live-race-content .f1-timing-tower {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.live-circuit-area {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.live-track-svg {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* Narrow landscape screens */
+
+@media (max-width: 1050px) {
+  .live-race-content {
+    grid-template-columns:
+      minmax(330px, 48%)
+      minmax(0, 1fr);
+  }
+}
+
+/* Short displays */
+
+@media (max-height: 750px) {
+  .live-race-header {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+
+  .live-circuit-heading {
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+
+  .replay-controls {
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+
+  .race-timeline {
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+
+  .live-circuit-footer {
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+}
+

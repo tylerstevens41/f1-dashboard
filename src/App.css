@@ -1,0 +1,527 @@
+
+@font-face {
+  font-family: "F1 Torque";
+  src: url("/fonts/Formula1-Bold_web_0.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Formula1 Regular";
+  src: url("/fonts/Formula1-Regular_web_0.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* MAIN APP */
+
+.app {
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  background: #090a0e;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* HEADER */
+
+.header {
+  height: 58px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 22px;
+  background: #121318;
+  border-bottom: 1px solid #2c2d35;
+}
+
+.branding {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-accent {
+  font-size: 28px;
+  font-weight: 900;
+  color: #e10600;
+}
+
+.branding h1 {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 2px;
+}
+
+.navigation {
+  display: flex;
+  gap: 8px;
+}
+
+.navigation button {
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 5px;
+  background: #292b33;
+  color: #ffffff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.navigation button.active {
+  background: #e10600;
+}
+
+/* FOUR PANEL DASHBOARD */
+
+.dashboard {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 42fr) minmax(0, 58fr);
+  gap: 10px;
+  padding: 10px;
+}
+
+.display-panel {
+  min-width: 0;
+  min-height: 0;
+  background: #181a20;
+  border: 1px solid #30323b;
+  border-radius: 10px;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.panel-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+}
+
+.panel-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #999ba7;
+  white-space: nowrap;
+}
+
+.status-message {
+  color: #a8a8b3;
+  font-size: 13px;
+}
+
+/* NEXT GRAND PRIX */
+
+.race-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.race-image {
+  flex: 1;
+  min-height: 55px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: #242630;
+}
+
+.race-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.image-placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background:
+    linear-gradient(135deg, #292b35, #17191f);
+}
+
+.image-placeholder span {
+  color: #e10600;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.image-placeholder small {
+  color: #858895;
+  font-size: 11px;
+}
+
+.race-info {
+  padding-top: 9px;
+}
+
+.race-info h3 {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.2;
+}
+
+.race-info p {
+  margin: 4px 0 0;
+  color: #a5a7b2;
+  font-size: 12px;
+}
+
+.countdown-heading {
+  margin-top: 11px;
+  margin-bottom: 6px;
+  color: #e10600;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+}
+
+.countdown-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.countdown-unit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 7px 4px;
+  background: #252730;
+  border-radius: 5px;
+}
+
+.countdown-unit strong {
+  font-size: clamp(18px, 2.2vw, 32px);
+  font-variant-numeric: tabular-nums;
+}
+
+.countdown-unit small {
+  margin-top: 2px;
+  color: #9698a5;
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+/* WEEKEND SCHEDULE */
+
+.schedule-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.weekend-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+}
+
+.weekend-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 8px;
+  border-bottom: 1px solid #30323b;
+  font-size: 12px;
+}
+
+.weekend-row:last-child {
+  border-bottom: none;
+}
+
+.session-name {
+  font-weight: 700;
+}
+
+.session-date {
+  color: #a6a8b2;
+}
+
+.session-time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.session-past {
+  opacity: 0.5;
+}
+
+/* CHAMPIONSHIP STANDINGS */
+
+.drivers-panel,
+.constructors-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.compact-standings {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  gap: 2px;
+}
+
+.compact-row {
+  display: grid;
+  grid-template-columns: 4px 28px minmax(0, 1fr) 55px;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  max-height: 42px;
+  padding: 3px 9px 3px 0;
+  background: #22242b;
+  border-radius: 4px;
+}
+
+.team-accent {
+  width: 4px;
+  height: 70%;
+  border-radius: 2px;
+  align-self: center;
+}
+
+.rank {
+  color: #e4e4e8;
+  font-size: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.competitor {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.competitor strong {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.competitor small {
+  color: #999ba7;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.points {
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* LIVE PAGE PLACEHOLDER */
+
+.live-placeholder {
+  flex: 1;
+  padding: 12px;
+}
+
+.live-placeholder .display-panel {
+  height: 100%;
+}
+
+/* SMALLER SCREENS / PORTRAIT PREVIEW */
+
+@media (max-width: 800px) {
+  .app {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .dashboard {
+    grid-template-columns: 1fr;
+    grid-template-rows: none;
+  }
+
+  .display-panel {
+    min-height: 260px;
+  }
+
+  .race-image {
+    min-height: 140px;
+  }
+
+  .compact-row {
+    min-height: 35px;
+    flex: none;
+  }
+
+  .header {
+    padding: 0 12px;
+  }
+
+  .branding h1 {
+    font-size: 12px;
+  }
+}
+/* FORMULA 1 REGULAR - ALL DASHBOARD TEXT */
+
+.app,
+.app * {
+  font-family: "Formula1 Regular", Arial, sans-serif;
+}
+
+/* F1 TORQUE - MAIN HEADINGS */
+
+.app .panel-heading h2,
+.app .race-info h3 {
+  font-family: "F1 Torque", "Formula1 Regular", sans-serif;
+  font-weight: normal;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.app .panel-heading h2 {
+  font-size: clamp(13px, 1.3vw, 21px);
+}
+
+.app .race-info h3 {
+  font-size: clamp(17px, 1.8vw, 28px);
+}
+/* F1 TORQUE - COUNTDOWN NUMBERS */
+
+.app .countdown-unit strong {
+  font-family: "F1 Torque", "Formula1 Regular", sans-serif;
+  font-weight: normal;
+  font-size: 32px;;
+  letter-spacing: 0px;
+}
+
+/* FORMULA 1 REGULAR - COUNTDOWN LABELS */
+
+.app .countdown-unit small {
+  font-family: "Formula1 Regular", Arial, sans-serif;
+  font-size: 10px;
+}
+
+/* F1 TORQUE - LIGHTS OUT IN */
+
+.app .countdown-heading {
+  font-family: "F1 Torque", "Formula1 Regular", sans-serif;
+  font-weight: normal;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+
+/* NEXT GRAND PRIX - SEPARATE HEADER */
+
+.race-panel {
+  --race-header-height: 55px;
+  background-image: none !important;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+/* Photo begins below the heading */
+.race-panel::after {
+  content: "";
+  position: absolute;
+  top: var(--race-header-height);
+  right: 0;
+  bottom: 0;
+  left: 0;
+
+  background-image: var(--race-photo);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+
+  z-index: -2;
+  pointer-events: none;
+}
+
+/* Dark overlay only on the photograph */
+.race-panel::before {
+  content: "";
+  position: absolute;
+  top: var(--race-header-height);
+  right: 0;
+  bottom: 0;
+  left: 0;
+
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.35),
+    rgba(0, 0, 0, 0.15) 35%,
+    rgba(0, 0, 0, 0.65) 100%
+  );
+
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Keep header visually separate */
+.race-panel .panel-heading {
+  min-height: 34px;
+  margin-bottom: 14px;
+}
+
+/* TRANSPARENT COUNTDOWN BOXES */
+
+.race-panel .countdown-unit {
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: none;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* WHITE CIRCUIT NAME */
+
+.race-panel .race-info p {
+  color: #ffffff;
+  opacity: 1;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+}
+/* TOP ROW */
+.race-panel {
+  grid-column: span 3;
+}
+
+.schedule-panel {
+  grid-column: span 1;
+}
+
+/* BOTTOM ROW */
+.drivers-panel {
+  grid-column: span 2;
+}
+
+.constructors-panel {
+  grid-column: span 2;
+}

@@ -203,47 +203,6 @@ function TyreIcon({ compound }) {
 }
 
 // ========================================
-// RETIREMENT DETECTION
-// ========================================
-
-function getRetirements(raceControl) {
-  const retirements = {};
-
-  for (const event of raceControl) {
-    const message = String(
-      event.message || ""
-    ).toUpperCase();
-
-    const number = Number(event.driver_number);
-    const time = Date.parse(event.date);
-
-    if (
-      !Number.isFinite(number) ||
-      number <= 0 ||
-      !Number.isFinite(time)
-    ) {
-      continue;
-    }
-
-    const isRetirement =
-      /\bRETIRED\b/.test(message) ||
-      /\bRETIREMENT\b/.test(message) ||
-      /\bWILL NOT RESTART\b/.test(message);
-
-    if (!isRetirement) continue;
-
-    if (
-      retirements[number] === undefined ||
-      time < retirements[number]
-    ) {
-      retirements[number] = time;
-    }
-  }
-
-  return retirements;
-}
-
-// ========================================
 // PIT STOP DETECTION
 // ========================================
 
@@ -480,11 +439,6 @@ export default function TimingTower({
           );
         }
 
-        // Detect retirements.
-        const retirements = getRetirements(
-          raceControl
-        );
-
         // Detect pit windows.
         const pitWindows = getPitWindows(
           pitStops
@@ -493,11 +447,6 @@ export default function TimingTower({
         // Store pit events for tyre changes.
         const groupedPitStops = groupPitStops(
           pitStops
-        );
-
-        console.log(
-          "Detected race-control retirements:",
-          retirements
         );
 
         console.log(
@@ -511,7 +460,6 @@ export default function TimingTower({
             intervals: groupedIntervals,
             laps: groupedLaps,
             stints: groupedStints,
-            retirements,
             pitWindows,
             pitStops: groupedPitStops,
           });
@@ -602,15 +550,8 @@ export default function TimingTower({
         // OUT STATUS
         // ==================================
 
-        const retirementTime =
-          data.retirements[number];
-
-        const isOut =
-          Boolean(driverStatuses[number]) ||
-          (
-            retirementTime !== undefined &&
-            playbackTime >= retirementTime
-          );
+        const driverStatus = driverStatuses[number] || null;
+        const isOut = driverStatus === "OUT" || driverStatus === "DNS";
 
         // ==================================
         // PIT STATUS
@@ -639,6 +580,7 @@ export default function TimingTower({
           completedLapNumber,
           tyre: tyreCompound,
           isOut,
+          driverStatus,
           isPitting,
         };
       })
@@ -793,7 +735,7 @@ export default function TimingTower({
                 }`}
               >
                 {driver.isOut
-                  ? "OUT"
+                  ? driver.driverStatus
                   : driver.isPitting
                     ? "PIT"
                     : Number(driver.position) === 1

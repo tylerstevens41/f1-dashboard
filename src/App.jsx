@@ -1,3 +1,4 @@
+
 import LiveRace from "./LiveRace";
 import { useEffect, useState } from "react";
 import "./App.css";
@@ -10,11 +11,12 @@ const TEAM_COLORS = {
   red_bull: "#3671C6",
   ferrari: "#E8002D",
   mercedes: "#27F4D2",
-  aston_martin: "#229971",
-  alpine: "#FF87BC",
-  haas: "#B6BABD",
-  rb: "#6692FF",
-  racing_bulls: "#6692FF",
+  aston_martin: "#00665E",
+  alpine: "#0090FF",
+  haas: "#E6002B",
+  rb: "#FFFFFF",
+  rb_f1_team: "#FFFFFF",
+  racing_bulls: "#FFFFFF",
   williams: "#64C4FF",
   sauber: "#52E252",
   audi: "#F50537",
@@ -27,6 +29,8 @@ const TEAM_NAMES = {
   red_bull: "Red Bull Racing",
   ferrari: "Ferrari",
   williams: "Williams",
+  rb: "Racing Bulls",
+  rb_f1_team: "Racing Bulls",
   racing_bulls: "Racing Bulls",
   aston_martin: "Aston Martin",
   haas: "Haas",
@@ -35,13 +39,30 @@ const TEAM_NAMES = {
   cadillac: "Cadillac",
 };
 
+// Team logos stored in public/teams/
+const TEAM_LOGOS = {
+  mclaren: "/teams/mclaren.png",
+  red_bull: "/teams/redbull.png",
+  ferrari: "/teams/ferrari.png",
+  mercedes: "/teams/mercedes.png",
+  aston_martin: "/teams/aston-martin.png",
+  alpine: "/teams/alpine.png",
+  haas: "/teams/haas.png",
+  rb: "/teams/racing-bulls.png",
+  rb_f1_team: "/teams/racing-bulls.png",
+  racing_bulls: "/teams/racing-bulls.png",
+  williams: "/teams/williams.png",
+  sauber: "/teams/sauber.png",
+  audi: "/teams/audi.png",
+  cadillac: "/teams/cadillac.png",
+};
+
 function getTeamName(constructor) {
   if (!constructor) return "Unknown Team";
 
   const id = constructor.constructorId?.toLowerCase() || "";
   const name = constructor.name?.toLowerCase() || "";
 
-  // Handle Racing Bulls naming variations
   if (
     id === "rb" ||
     id === "racing_bulls" ||
@@ -55,9 +76,29 @@ function getTeamName(constructor) {
   return TEAM_NAMES[id] || constructor.name || "Unknown Team";
 }
 
-
 function getTeamColor(id) {
-  return TEAM_COLORS[id] || "#777777";
+  return TEAM_COLORS[id?.toLowerCase()] || "#777777";
+}
+
+function TeamLogo({ constructorId }) {
+  const logo = TEAM_LOGOS[constructorId?.toLowerCase()];
+
+  if (!logo) {
+    return <span className="standings-logo-slot" />;
+  }
+
+  return (
+    <span className="standings-logo-slot">
+      <img
+        className="standings-team-logo"
+        src={logo}
+        alt=""
+        onError={(event) => {
+          event.currentTarget.style.visibility = "hidden";
+        }}
+      />
+    </span>
+  );
 }
 
 // Add your own Grand Prix images here later.
@@ -118,11 +159,13 @@ function App() {
   const [view, setView] = useState("dashboard");
   const [nextRace, setNextRace] = useState(null);
   const [raceError, setRaceError] = useState("");
+
   const [drivers, setDrivers] = useState([]);
   const [constructors, setConstructors] = useState([]);
   const [standingsError, setStandingsError] = useState("");
   const [standingsLoading, setStandingsLoading] = useState(true);
   const [standingsRound, setStandingsRound] = useState("");
+
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -182,6 +225,7 @@ function App() {
         setConstructors(
           constructorList?.ConstructorStandings || []
         );
+
         setStandingsRound(driverList?.round || "");
         setStandingsError("");
       } catch (error) {
@@ -200,6 +244,7 @@ function App() {
   }, []);
 
   const sessions = getWeekendSessions(nextRace);
+
   const raceStart = getSessionDate(
     nextRace
       ? { date: nextRace.date, time: nextRace.time }
@@ -240,6 +285,7 @@ function App() {
           >
             Dashboard
           </button>
+
           <button
             className={view === "live" ? "active" : ""}
             onClick={() => setView("live")}
@@ -252,11 +298,12 @@ function App() {
       {view === "dashboard" ? (
         <main className="dashboard">
           {/* TOP LEFT: NEXT RACE */}
-          <section className="display-panel race-panel"
-          style={
-            raceImage
-              ? { "--race-photo": `url("${raceImage}")` }
-              : {}
+          <section
+            className="display-panel race-panel"
+            style={
+              raceImage
+                ? { "--race-photo": `url("${raceImage}")` }
+                : {}
             }
           >
             <div className="panel-heading">
@@ -350,7 +397,8 @@ function App() {
             <div className="panel-heading">
               <h2>DRIVERS' STANDINGS</h2>
               <span className="panel-label">
-                TOP 10 · {standingsRound
+                TOP 10 ·{" "}
+                {standingsRound
                   ? `ROUND ${standingsRound}`
                   : "CHAMPIONSHIP"}
               </span>
@@ -367,23 +415,41 @@ function App() {
             ) : (
               <div className="compact-standings">
                 {drivers.slice(0, 10).map((driver) => {
-                  const team = driver.Constructors[0];
+                  const team = driver.Constructors?.[0];
                   const color = getTeamColor(
                     team?.constructorId
                   );
 
                   return (
                     <div
-                      className="compact-row"
-                      key={driver.Driver.driverId}
-                    >
+                    className={`compact-row ${
+                      driver.Driver.driverId === "antonelli"
+                        ? "team-background-test"
+                        : ""
+                    }`}
+                    key={driver.Driver.driverId}
+                    style={
+                      driver.Driver.driverId === "antonelli"
+                        ? {
+                            "--team-background":
+                              'url("/teams/mercedes.png")',
+                          }
+                        : {}
+                    }
+                  >
                       <span
                         className="team-accent"
                         style={{ backgroundColor: color }}
                       />
+
                       <strong className="rank">
                         {driver.position}
                       </strong>
+
+                      <TeamLogo
+                        constructorId={team?.constructorId}
+                      />
+
                       <div className="competitor">
                         <strong>
                           {driver.Driver.givenName}{" "}
@@ -391,6 +457,7 @@ function App() {
                         </strong>
                         <small>{getTeamName(team)}</small>
                       </div>
+
                       <strong className="points">
                         {driver.points}
                       </strong>
@@ -431,12 +498,23 @@ function App() {
                         ),
                       }}
                     />
+
                     <strong className="rank">
                       {team.position}
                     </strong>
+
+                    <TeamLogo
+                      constructorId={
+                        team.Constructor.constructorId
+                      }
+                    />
+
                     <div className="competitor">
-                      <strong>{getTeamName(team.Constructor)}</strong>
+                      <strong>
+                        {getTeamName(team.Constructor)}
+                      </strong>
                     </div>
+
                     <strong className="points">
                       {team.points}
                     </strong>

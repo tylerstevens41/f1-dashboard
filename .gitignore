@@ -1,3 +1,4 @@
+
 # Logs
 logs
 *.log
@@ -7,10 +8,25 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies and builds
 node_modules
 dist
 dist-ssr
 *.local
+
+# Environment variables and credentials
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Downloaded F1 replay data cache
+data-cache/
 
 # Editor directories and files
 .vscode/*

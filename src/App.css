@@ -289,7 +289,7 @@
 
 .compact-row {
   display: grid;
-  grid-template-columns: 4px 28px minmax(0, 1fr) 55px;
+  grid-template-columns: 4px 28px 32px minmax(0, 1fr) 55px;
   align-items: center;
   gap: 10px;
   flex: 1;
@@ -524,4 +524,53 @@
 
 .constructors-panel {
   grid-column: span 2;
+}
+/* TEAM LOGOS IN CHAMPIONSHIP STANDINGS */
+
+.standings-logo-slot {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.standings-team-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  display: block;
+}
+/* TEST: OVERSIZED MERCEDES LOGO ACROSS ENTIRE ROW */
+
+.compact-row.team-background-test {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.compact-row.team-background-test::before {
+  content: "";
+  position: absolute;
+
+  width: 300px;
+  height: 300px;
+
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+
+  background-image: var(--team-background);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+
+  opacity: 0.65;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.compact-row.team-background-test > * {
+  position: relative;
+  z-index: 1;
 }

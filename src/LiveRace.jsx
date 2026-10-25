@@ -1,5 +1,6 @@
 
 import { useState } from "react";
+import AustinReplay from "./AustinReplay";
 import ReplayRace from "./ReplayRace";
 import LiveSession from "./LiveSession";
 
@@ -30,9 +31,10 @@ export default function LiveRace() {
         >
           {mode === "replay" ? "● REPLAY" : "REPLAY"}
         </button>
+        <button type="button" onClick={() => setMode("austin")} aria-pressed={mode === "austin"}>Austin Replay</button>
       </div>
 
-      {mode === "live" ? <LiveSession /> : <ReplayRace />}
+      {mode === "live" ? <LiveSession /> : mode === "austin" ? <AustinReplay /> : <ReplayRace />}
     </>
   );
 }

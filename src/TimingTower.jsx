@@ -386,7 +386,7 @@ export default function TimingTower({
           laps,
           intervals,
           stints,
-          raceControl,
+          ,
           pitStops,
         ] = await Promise.all(
           responses.map((response) => response.json())

@@ -184,7 +184,7 @@ export default function CircuitMap({
         displayHeight + MAP_MARGIN * 2,
       ].join(" "),
     };
-  }, [track]);
+  }, [track, circuit.rotation]);
 
   if (!track || !layout) return null;
 

@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 
+import austin from "./circuits/tracks/austin";
 import LiveCircuitSvg from "./circuits/LiveCircuitSvg";
 
 import "./LiveRace.css";
@@ -651,7 +652,7 @@ export default function LiveSession() {
   const sessionType = getSessionType(session);
 
   // Austin is the only configured circuit.
-  const circuitName = "Austin";
+  const circuitName = austin.sources.livef1.sessionName;
 
   // ==========================================
   // AUTO-FIT TIMING TOWER

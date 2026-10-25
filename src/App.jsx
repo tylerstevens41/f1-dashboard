@@ -166,7 +166,7 @@ function App() {
   const [standingsLoading, setStandingsLoading] = useState(true);
   const [standingsRound, setStandingsRound] = useState("");
 
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     async function loadRace() {

@@ -496,7 +496,8 @@ export default function LiveRace() {
 
   useEffect(() => {
     if (playbackTime >= endTime) {
-      setIsPlaying(false);
+      const frame = requestAnimationFrame(() => setIsPlaying(false));
+      return () => cancelAnimationFrame(frame);
     }
   }, [playbackTime, endTime]);
 

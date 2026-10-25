@@ -1,3 +1,6 @@
+import CircuitRenderer from "./circuits/CircuitRenderer";
+import { createGeometry } from "./circuits/geometry";
+import austin from "./circuits/tracks/austin";
 
 import {
   useEffect,
@@ -10,7 +13,6 @@ const DATA_URL = "/data/austin-2026-race.json";
 const STORAGE_KEY = "austin-2026-track-markers";
 
 const TRACK_PADDING = 900;
-const MARKER_RADIUS = 350;
 const MAX_INTERPOLATION_GAP_MS = 5000;
 
 function formatClock(ms) {
@@ -108,42 +110,6 @@ function interpolateLocation(points, time) {
   };
 }
 
-function makeTrack(reference) {
-  if (!reference?.length) return null;
-
-  const xs = reference.map((p) => p.x);
-  const ys = reference.map((p) => p.y);
-
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-
-  const project = (x, y) => ({
-    x: x - minX + TRACK_PADDING,
-    y: maxY - y + TRACK_PADDING,
-  });
-
-  const points = reference.map((p) =>
-    project(p.x, p.y)
-  );
-
-  const path = points
-    .map(
-      (p, i) =>
-        `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`
-    )
-    .join(" ");
-
-  return {
-    path,
-    points,
-    project,
-    width: maxX - minX + TRACK_PADDING * 2,
-    height: maxY - minY + TRACK_PADDING * 2,
-  };
-}
-
 function loadSavedMarkers() {
   try {
     return JSON.parse(
@@ -237,7 +203,7 @@ export default function AustinReplay() {
   );
 
   const track = useMemo(
-    () => makeTrack(data?.reference),
+    () => data?.reference ? createGeometry(data.reference, { padding: TRACK_PADDING, matrix: austin.sources.openf1.matrix }) : null,
     [data]
   );
 
@@ -554,41 +520,11 @@ export default function AustinReplay() {
             CIRCUIT OF THE AMERICAS
           </div>
 
-          <svg
-            ref={svgRef}
-            viewBox={
-              `0 0 ${track.width} ${track.height}`
-            }
-            preserveAspectRatio="xMidYMid meet"
-            onClick={handleTrackClick}
-            style={{
-              width: "100%",
-              height: 540,
-              cursor:
-                editMode === "view"
-                  ? "default"
-                  : "crosshair",
-            }}
-          >
-            {/* Track outline */}
-            <path
-              d={track.path}
-              fill="none"
-              stroke="#2a303a"
-              strokeWidth="350"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-
-            <path
-              d={track.path}
-              fill="none"
-              stroke="#e5e8ee"
-              strokeWidth="155"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-
+          <CircuitRenderer svgRef={svgRef} geometry={track} circuit={austin} variant="replay" flag={currentFlag}
+            annotationsCalibrated={false}
+            drivers={cars.filter(car => car.point).map(car => ({ ...car, ...car.point, label: car.name_acronym }))}
+            selectedDriver={selectedDriver} onSelectDriver={editMode === "view" ? setSelectedDriver : undefined}
+            onClick={handleTrackClick} style={{ width: "100%", height: 540, cursor: editMode === "view" ? "default" : "crosshair" }}>
             {/* Editable track markers */}
             {markers.map((marker) => (
               <g
@@ -624,79 +560,7 @@ export default function AustinReplay() {
               </g>
             ))}
 
-            {/* Driver markers */}
-            {cars
-              .filter((car) => car.point)
-              .map((car) => {
-                const selected =
-                  selectedDriver === car.number;
-
-                return (
-                  <g
-                    key={car.number}
-                    transform={
-                      `translate(${car.point.x} ${car.point.y})`
-                    }
-                    onClick={(event) => {
-                      if (editMode !== "view") return;
-
-                      event.stopPropagation();
-                      setSelectedDriver(car.number);
-                    }}
-                    style={{ cursor: "pointer" }}
-                  >
-                    {selected && (
-                      <circle
-                        r="610"
-                        fill={car.color}
-                        opacity="0.2"
-                      />
-                    )}
-
-                    <circle
-                      r={
-                        selected
-                          ? MARKER_RADIUS + 80
-                          : MARKER_RADIUS
-                      }
-                      fill={car.color}
-                      stroke="#0b0d12"
-                      strokeWidth="45"
-                    />
-
-                    <circle
-                      r="75"
-                      fill="#ffffff"
-                    />
-
-                    <g transform="translate(0 -650)">
-                      <rect
-                        x="-540"
-                        y="-180"
-                        width="1080"
-                        height="360"
-                        rx="60"
-                        fill="#10141c"
-                        stroke={car.color}
-                        strokeWidth="22"
-                      />
-
-                      <text
-                        x="0"
-                        y="25"
-                        textAnchor="middle"
-                        dominantBaseline="middle"
-                        fontSize="280"
-                        fontWeight="800"
-                        fill="#ffffff"
-                      >
-                        {car.name_acronym}
-                      </text>
-                    </g>
-                  </g>
-                );
-              })}
-          </svg>
+          </CircuitRenderer>
 
           {/* TRACK EDITOR */}
           <div style={styles.editor}>

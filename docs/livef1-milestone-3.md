@@ -96,3 +96,68 @@ python -m bridge.server --idle --allow-test --recording recordings/livef1-small.
 Tests use explicit synthetic protocol/trajectory fixtures, not fabricated race recordings. They cover continuous timestamps, irregular intervals, batched/late/duplicate/invalid samples, streaming batches at all four speeds, pause/resume/speed transitions, clip resets, stale/gap recovery, background suspension, adaptive buffering, calibration projection and 22 stable marker subscriptions. Backend tests exercise compressed LiveF1 parsing, ordered bounded retention, invalid-last-record batches, and broadcast TEST clocks/pause controls through actual local WebSockets.
 
 Run the commands above. Build/lint passing is not visual proof. Authenticated representative Austin data and an actual browser observation remain necessary before merge. No claim of visually verified smooth LiveF1 movement is made here. Keep PR #4 draft pending that local check. Calibration, source geometry, archive bounds and the timing tower remain intact.
+
+## PR #4 refinement: eliminate presentation-rate pulsing
+
+This section supersedes the original clock-slew and buffer-adjustment behavior described above. Same branch and PR; no calibration or trajectory change.
+
+### What the fixed-buffer report revealed
+
+A manual 1,000 ms buffer still went through two velocity feedback loops: `sync()` changed source clock rate by up to ±10% from individual packet phase errors, and `frame()` advanced the cursor toward a changing target with a 110% catch-up ceiling. A fixed delay did not disable those loops. TEST ticks also captured their time before awaiting variable event/broadcast work. Clock packets/heartbeats could therefore describe an earlier point on the timeline than their actual send time. These are code-level causes that can pulse constant-velocity input; they do not prove the real Austin GPS is uniformly smooth.
+
+### Refined timeline
+
+- The backend uses a piecewise-affine monotonic playback clock: source offset = anchor offset + elapsed monotonic time × selected rate. Tick intervals do not integrate into its rate. Pause/speed controls account for elapsed time at the old rate first. Outgoing transport timestamps are computed after event delivery work, separately from archived topic timestamps. `transportMs` makes the backend's actual source-time/wall-time derivative observable.
+- In TEST, the frontend clock and presentation cursor run at exactly the selected rate between explicit play/pause/speed/restart controls. Periodic clock packets measure phase error but **do not modulate velocity**. On the same local device, monotonic clocks have the same nominal rate; a small constant packet-delay phase offset is acceptable and remains visible. This is not the old phase-chasing servo.
+- In LIVE, packet jitter also leaves rate nominal. Only sustained phase error outside a 50 ms deadband is considered, using a robust 30-second window. Correction is limited to ±0.1% (1,000 ppm), held for at least 30 seconds; a reversal requires an interval at nominal rate. There is no packet-by-packet ±10% adjustment.
+- Adaptive buffer statistics remain visible, but chosen delay is **locked when priming**. Recommendations changing during normal running do not alter speed. A genuine widespread underrun can hide/re-prime (at most once per 5 seconds); it does not repeatedly accelerate/decelerate cars to refill a buffer. Manually changing buffer mode/value is an explicit re-prime, so it can briefly hide markers. It is not a CSS easing operation.
+- Missing data, spike rejection, stale hiding, driver IDs, calibration projection and linear interpolation between measured GPS samples remain intact. No Hermite trajectory, synthetic telemetry, speed flattening or unlimited extrapolation was introduced.
+
+### Measure source versus animation speed
+
+Expand **Animation diagnostics** while playing your existing clip. It records only while open and retains at most 3,600 animation frames. Select a driver; a new selection clears the trace. The plots show:
+
+1. **Timeline rate / selected playback speed.** In TEST this should remain at 1.000 while playing, including with irregular delivery. Pause is 0. The clock plot should not oscillate at every packet/heartbeat. The numeric header also shows backend rate, phase error, correction ppm, locked buffer, recommended buffer, actual effective delay and rebuffer count.
+2. **GPS-implied versus rendered speed**, in native coordinate units per *source* second (not metres/s). `sourcePathSpeed` measures distance along the actual GPS polyline over the rendered source-time interval. `renderedPathSpeed` measures the same traveled polyline distance per wall time, divided by selected TEST speed. Their ratio isolates timeline-rate error. `renderedChordSpeed` uses the direct distance between successive drawn positions and can dip for a frame crossing a corner even when polyline travel speed is unchanged.
+
+Click **Export bounded CSV trace** after 20–40 seconds. Columns include source/presentation/wall clocks, measured presentation rate, frontend/backend rates, phase error, locked/recommended/effective buffer values, GPS segment duration, segment speed, source-path speed, rendered-path/chord speeds, repeated-coordinate flags and motion state. No account credentials, tokens or messages are included. The trace records mathematical marker positions, not an independent browser video or FPS observation.
+
+Interpretation:
+
+- Stable source-implied speed plus varying presentation rate implicates the animation timeline.
+- A flat normalized rate with GPS-implied speed pulses, repeated coordinates or alternating source intervals implicates the source sampling/quantization. That alone does **not** establish actual vehicle braking/acceleration.
+- Flat path-speed comparison with chord-speed dips confined to direction changes indicates polyline/frame geometry. We do not invent a smooth path to conceal that effect.
+- Underrun/recovery/rebuffer events indicate data availability limits; compare them with packet cadence and rejected counts.
+
+### Exact local update and comparison
+
+Stop both running processes, then from your existing checkout:
+
+```powershell
+git switch feat/livef1-smooth-animation
+git pull --ff-only origin feat/livef1-smooth-animation
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r bridge/requirements.txt
+python -m unittest discover -s bridge/tests -v
+python -m bridge.server --login --idle --allow-test
+```
+
+In another terminal:
+
+```powershell
+npm ci
+npm test
+npm run lint
+npm run build
+npm run dev
+```
+
+Keep your existing `public/circuits/austin-calibration.json`; no recalibration or cache deletion is needed. Load the same authenticated 2026 Austin TEST clip/window you used before.
+
+1. Select 1× and manual buffer **1,000 ms**, then allow the one-time re-prime. Choose a driver in Animation diagnostics and record a straight section and several corners. Confirm flat normalized presentation rate and compare the two speed plots.
+2. Export the trace. Repeat with automatic mode; its recommended delay may move, but locked/effective delay and rate should not follow a periodic cycle during healthy interpolation. Rebuffer count should stay unchanged unless availability genuinely fails.
+3. Repeat at 2×, 5× and 10×. Speeds in the source-speed plot are normalized by selected playback rate, so they can be compared across modes.
+4. Test pause/resume, speed changes, clip restart and clip switching. Pausing must freeze the cursor; resuming must preserve position. A restart/switch intentionally resets buffers and traces.
+5. Check LIVE with real data when available. Sustained correction should stay within ±1,000 ppm and should not flip on every packet.
+
+Regression tests now isolate fixed-buffer jitter, exact selected-rate playback, changing adaptive recommendations, bounded LIVE drift corrections, irregular GPS intervals, curve chord/path measurements, quantized/repeated samples, pause/resume/restart, monotonic backend scheduling and send-time transport stamping. Existing tests remain in place. Actual visual behavior with the user's authenticated Austin data is still a local verification gate; no such observation is claimed here.

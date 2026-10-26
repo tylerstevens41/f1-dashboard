@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from websockets.asyncio.server import serve
 from .archive import fetch_clip, list_sessions, load_recording, save_clip
 from .protocol import TOPICS, RaceState
+from .playback_clock import PlaybackClock
 
 
 class Bridge:
@@ -24,6 +25,7 @@ class Bridge:
         self.recording = None
         self.record_started = None
         self.clip = None
+        self.timeline = None
         self.offset = 0
         self.last_tick = time.monotonic()
 
@@ -44,12 +46,28 @@ class Bridge:
                 'archiveStartSeconds':self.clip.get('startOffsetSeconds'),
                 'sessionPath':self.clip.get('sessionPath')}
 
+    def stamp_transport(self, message):
+        now=time.monotonic()
+        info=self.playback_info()
+        if self.state.mode == 'TEST' and self.clip and self.timeline:
+            offset=self.timeline.value(now)
+            message['clockMs']=self.clip['originMs']+offset
+            info={**info,'offsetMs':offset}
+        elif self.state.mode == 'LIVE':
+            message['clockMs']=datetime.now(timezone.utc).timestamp()*1000
+        message['transportMs']=now*1000
+        message['playbackInfo']=info
+        return message
+
+    def transport_message(self, kind, **extra):
+        return self.stamp_transport(self.state.envelope(kind,**extra))
+
     def snapshot(self):
-        return {**self.state.snapshot(),'playbackInfo':self.playback_info()}
+        return self.stamp_transport(self.state.snapshot())
 
     async def status(self, status):
         self.state.upstream = status
-        await self.broadcast(self.state.envelope('status', error=self.error, playbackInfo=self.playback_info()))
+        await self.broadcast(self.transport_message('status', error=self.error, playbackInfo=self.playback_info()))
 
     async def emit(self, topic, payload, timestamp=None, clock_ms=None):
         if topic not in TOPICS:
@@ -60,7 +78,7 @@ class Bridge:
             messages = self.state.ingest(topic, payload, timestamp, clock_ms)
         except (ValueError, KeyError, TypeError):
             self.error = f'Invalid {topic} update; retained previous state.'
-            await self.broadcast(self.state.envelope('status', error=self.error, playbackInfo=self.playback_info()))
+            await self.broadcast(self.transport_message('status', error=self.error, playbackInfo=self.playback_info()))
             return
         for message in messages:
             await self.broadcast(message)
@@ -99,6 +117,7 @@ class Bridge:
     async def start_live(self):
         await self.stop_source()
         self.clip = None
+        self.timeline = None
         self.state.reset('LIVE')
         self.error = None
         await self.broadcast(self.snapshot())
@@ -123,6 +142,7 @@ class Bridge:
     async def start_clip(self, clip):
         await self.stop_source()
         self.clip = clip
+        self.timeline = PlaybackClock(clip['durationMs'],time.monotonic())
         self.offset = 0
         self.state.reset('TEST')
         self.state.topics = copy.deepcopy(clip['initial'])
@@ -143,7 +163,7 @@ class Bridge:
         while self.clip and self.offset < self.clip['durationMs']:
             now = time.monotonic()
             if self.state.playback == 'playing':
-                self.offset = min(self.clip['durationMs'], self.offset + (now-self.last_tick)*1000*self.state.speed)
+                self.offset = self.timeline.value(now)
                 self.state.clock_ms = self.clip['originMs'] + self.offset
                 while index < len(self.clip['events']) and self.clip['events'][index]['offsetMs'] <= self.offset:
                     event = self.clip['events'][index]
@@ -152,16 +172,17 @@ class Bridge:
                 self.state.clock_ms = self.clip['originMs'] + self.offset
             self.last_tick = now
             if self.state.playback == 'playing':
-                await self.broadcast(self.state.envelope('clock',playbackInfo=self.playback_info()))
+                await self.broadcast(self.transport_message('clock',playbackInfo=self.playback_info()))
             await asyncio.sleep(0.025)
+        self.timeline.control(time.monotonic(),running=False)
         self.state.playback = 'ended'
-        await self.broadcast(self.state.envelope('status', playbackInfo=self.playback_info()))
+        await self.broadcast(self.transport_message('status', playbackInfo=self.playback_info()))
 
     async def heartbeat(self):
         while True:
             if self.state.mode == 'LIVE':
                 self.state.clock_ms = datetime.now(timezone.utc).timestamp()*1000
-            await self.broadcast(self.state.envelope('status', error=self.error, playbackInfo=self.playback_info()))
+            await self.broadcast(self.transport_message('status', error=self.error, playbackInfo=self.playback_info()))
             await asyncio.sleep(1)
 
     async def command(self, client, command):
@@ -184,21 +205,25 @@ class Bridge:
                     await self.send(client,{'version':1,'type':'windows','windows':windows})
                 elif action == 'play'  and self.state.mode == 'TEST' and self.clip:
                     if self.state.playback == 'ended':
+                        selected_speed=self.state.speed
                         await self.start_clip(self.clip)
+                        self.state.speed=selected_speed
+                    self.timeline.control(time.monotonic(),running=True,speed=self.state.speed)
                     self.state.playback = 'playing'
-                    self.last_tick = time.monotonic()
                 elif action == 'pause' and self.state.mode == 'TEST':
+                    self.timeline.control(time.monotonic(),running=False)
                     self.state.playback = 'paused'
                 elif action == 'speed' and self.state.mode == 'TEST':
                     speed = float(command['speed'])
                     if speed not in (1,2,5,10):
                         raise ValueError('Unsupported speed')
+                    self.timeline.control(time.monotonic(),speed=speed)
                     self.state.speed = speed
                 elif action == 'live':
                     await self.start_live()
                 else:
                     raise ValueError('Unsupported action')
-                await self.broadcast(self.state.envelope('status', playbackInfo=self.playback_info()))
+                await self.broadcast(self.transport_message('status', playbackInfo=self.playback_info()))
             except Exception:
                 # Never send upstream exception text: auth libraries can include
                 # response bodies, URLs or account details in their exceptions.

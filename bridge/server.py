@@ -151,6 +151,8 @@ class Bridge:
                     index += 1
                 self.state.clock_ms = self.clip['originMs'] + self.offset
             self.last_tick = now
+            if self.state.playback == 'playing':
+                await self.broadcast(self.state.envelope('clock',playbackInfo=self.playback_info()))
             await asyncio.sleep(0.025)
         self.state.playback = 'ended'
         await self.broadcast(self.state.envelope('status', playbackInfo=self.playback_info()))
@@ -196,7 +198,7 @@ class Bridge:
                     await self.start_live()
                 else:
                     raise ValueError('Unsupported action')
-                await self.send(client,self.state.envelope('status', playbackInfo=self.playback_info()))
+                await self.broadcast(self.state.envelope('status', playbackInfo=self.playback_info()))
             except Exception:
                 # Never send upstream exception text: auth libraries can include
                 # response bodies, URLs or account details in their exceptions.

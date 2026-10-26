@@ -68,9 +68,41 @@ class ProtocolTests(unittest.TestCase):
         state.ingest('Position.z',compressed({'Position':positions}),clock_ms=utc_ms('2024-10-20T19:00:29Z'))
         history=state.topics['Position.z']['1']['_history']
         self.assertIsInstance(history,list)
-        self.assertEqual(len(history),24)
+        self.assertEqual(len(history),30)
         self.assertEqual(history[-1]['x'],39)
         self.assertTrue(all(a['time']<b['time'] for a,b in zip(history,history[1:])))
+
+    def test_position_retention_is_bounded_to_128_samples(self):
+        from datetime import datetime,timedelta,timezone
+        state=RaceState('TEST')
+        start=datetime(2024,10,20,19,tzinfo=timezone.utc)
+        packet=compressed({'Position':[{'Timestamp':(start+timedelta(milliseconds=i*250)).isoformat(),
+                'Entries':{'1':{'X':10+i,'Y':20}}} for i in range(150)]})
+        state.ingest('Position.z',packet,clock_ms=1000)
+        history=state.topics['Position.z']['1']['_history']
+        self.assertEqual(len(history),128)
+        self.assertEqual(history[-1]['x'],159)
+
+    def test_late_batch_fills_missing_samples_without_rewinding_latest(self):
+        state=RaceState('TEST')
+        def packet(seconds):
+            return compressed({'Position':[{'Timestamp':f'2024-10-20T19:00:{second:02d}Z','Entries':{'1':{'X':10+second,'Y':20}}} for second in seconds]})
+        state.ingest('Position.z',packet([1,3]),clock_ms=1000)
+        state.ingest('Position.z',packet([2]),clock_ms=2000)
+        driver=state.topics['Position.z']['1']
+        self.assertEqual(driver['X'],13)
+        self.assertEqual([p['x'] for p in driver['_history']],[11,12,13])
+
+    def test_invalid_newest_sample_does_not_erase_valid_batch(self):
+        state=RaceState('TEST')
+        payload=compressed({'Position':[
+            {'Timestamp':'2024-10-20T19:00:01Z','Entries':{'1':{'X':10,'Y':20}}},
+            {'Timestamp':'2024-10-20T19:00:02Z','Entries':{'1':{'X':None,'Y':20}}}]})
+        state.ingest('Position.z',payload,clock_ms=1000)
+        driver=state.topics['Position.z']['1']
+        self.assertEqual(driver['X'],10)
+        self.assertEqual(driver['_rejectedSamples'],1)
+        self.assertEqual(len(driver['_history']),1)
 
     def test_bounded_race_control(self):
         state = RaceState()

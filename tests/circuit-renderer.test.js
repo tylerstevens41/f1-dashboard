@@ -20,7 +20,7 @@ test('shared renderer supports replay markers, calibrated features and flags', a
     assert.equal((markup.match(/pathLength="1"/g) ?? []).length,2);
     const uncalibrated = renderToStaticMarkup(createElement(Renderer, {...props,annotationsCalibrated:false}));
     assert.doesNotMatch(uncalibrated,/T1/);
-    const animated = renderToStaticMarkup(createElement(Renderer, {...props,animate:true,clockRef:{current:{time:1000,receivedAt:0,running:false,speed:1}},motionOptions:austin.motion}));
+    const animated = renderToStaticMarkup(createElement(Renderer, {...props,animate:true,animation:{subscribe:()=>()=>{}}}));
     assert.match(animated,/data-driver="1"/);
     assert.match(animated,/VER/);
     assert.match(animated,/visibility:hidden/);

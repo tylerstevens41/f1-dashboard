@@ -8,7 +8,7 @@ const austin = {
     // OpenF1 uses the reference embedded in that replay, NOT the LiveF1 reference.
     openf1: { reference: "replay", matrix: [1, 0, 0, 1, 0, 0] },
   },
-  motion: { delayMs: 250, maxGapMs: 1500, staleMs: 2500, maxUnitsPerMs: 2 },
+  motion: { minBufferMs: 100, maxBufferMs: 5000, maxGapMs: 1500, staleMs: 2500, maxUnitsPerMs: 2 },
   // Native units/ms is a conservative configurable spike guard, not a speed in metres/s.
   annotations: {
     corners: [], // { number, at, offset: { x, y } }

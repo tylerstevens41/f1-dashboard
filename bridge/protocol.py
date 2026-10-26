@@ -125,26 +125,36 @@ class RaceState:
             # Keep newest per driver; a missing sample must not erase another car.
             accepted = {}
             for number, record in data.items():
-                sample_time = utc_ms(record.get('Utc')) or self.clock_ms
                 old = previous.get(number, {})
-                if sample_time < old.get('_sampleTimeMs', -math.inf):
-                    continue
-                if topic == 'Position.z' and not all(
-                    isinstance(record.get(k), (int, float)) and not isinstance(record[k], bool)
-                    and math.isfinite(record[k]) for k in ('X', 'Y')
-                ):
+                rejected = old.get('_rejectedSamples', 0)
+                if topic == 'Position.z':
+                    batch = record.get('_batch', [record])
+                    valid = [sample for sample in batch if all(
+                        isinstance(sample.get(k), (int,float)) and not isinstance(sample[k],bool)
+                        and math.isfinite(sample[k]) for k in ('X','Y'))]
+                    rejected += len(batch)-len(valid)
+                    if not valid:
+                        if old:
+                            accepted[number] = {**old,'_history':old.get('_history',[]),'_rejectedSamples':rejected}
+                        continue
+                    record = {**max(valid,key=lambda r:utc_ms(r.get('Utc')) or -math.inf),'_batch':valid}
+                sample_time = utc_ms(record.get('Utc')) or self.clock_ms
+                if topic != 'Position.z' and sample_time < old.get('_sampleTimeMs', -math.inf):
                     continue
                 history = list(old.get('_history', []))
+                by_time = {p['time']:p for p in history}
                 for sample in sorted(record.get('_batch', [record]), key=lambda r: utc_ms(r.get('Utc')) or 0):
                     t = utc_ms(sample.get('Utc'))
-                    if t is None or (history and t <= history[-1]['time']):
+                    if t is None:
                         continue
                     if all(isinstance(sample.get(k),(int,float)) and not isinstance(sample[k],bool) and math.isfinite(sample[k]) for k in ('X','Y')):
-                        history.append({'time':t,'x':sample['X'],'y':sample['Y']})
-                accepted[number] = {k:v for k,v in record.items() if k != '_batch'}
-                accepted[number]['_sampleTimeMs'] = sample_time
+                        by_time[t] = {'time':t,'x':sample['X'],'y':sample['Y']}
+                history = sorted(by_time.values(),key=lambda p:p['time'])[-128:]
+                accepted[number] = {k:v for k,v in (old if sample_time < old.get('_sampleTimeMs',-math.inf) else record).items() if k != '_batch'}
+                accepted[number]['_sampleTimeMs'] = max(sample_time,old.get('_sampleTimeMs',-math.inf))
                 if topic == 'Position.z':
-                    accepted[number]['_history'] = history[-24:]
+                    accepted[number]['_history'] = history
+                    accepted[number]['_rejectedSamples'] = rejected
             data = accepted
             if not data:
                 return messages

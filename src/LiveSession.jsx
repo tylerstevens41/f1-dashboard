@@ -1,6 +1,6 @@
 import useRaceFeed from "./race/useRaceFeed";
 import RaceDevTools from "./race/RaceDevTools";
-import { flattenRecord, selectCircuit, validGps, tyrePresentation } from "./race/state";
+import { flattenRecord, selectCircuit, tyrePresentation } from "./race/state";
 
 import {
   useMemo,
@@ -332,7 +332,7 @@ function getSessionType(session) {
 
 export default function LiveSession() {
   const feed = useRaceFeed();
-  const { race, connection, clockMs } = feed;
+  const { race, connection } = feed;
   const session = race.topics.SessionInfo ?? EMPTY;
   const driversByNumber = race.topics.DriverList ?? EMPTY;
   const timingByNumber = race.topics.TimingData ?? EMPTY;
@@ -411,7 +411,7 @@ export default function LiveSession() {
     positionsByNumber,
   ]);
 
-  const gpsDrivers = useMemo(() => drivers.filter(driver => validGps(driver.gps, clockMs)), [drivers, clockMs]);
+  const gpsDrivers = useMemo(() => drivers.filter(driver => driver.gps && Number.isFinite(driver.gps.X) && Number.isFinite(driver.gps.Y)), [drivers]);
 
   // ==========================================
   // CIRCUIT
@@ -773,10 +773,8 @@ export default function LiveSession() {
         >
           {circuitName ? <LiveCircuitSvg
             key={`${race.generation}-${circuitName}`}
-            clockMs={clockMs}
+            animation={feed.animation}
             mode={race.mode}
-            playback={race.playback}
-            speed={race.speed}
             circuitName={circuitName}
             drivers={gpsDrivers}
             selectedDriver={selectedDriver}

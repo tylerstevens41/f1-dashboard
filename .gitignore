@@ -38,3 +38,8 @@ data-cache/
 *.njsproj
 *.sln
 *.sw?
+
+# Backend-only LiveF1 recordings and auth caches
+recordings/
+.livef1/
+*f1tv_auth_token*.json

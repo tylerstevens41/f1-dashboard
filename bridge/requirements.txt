@@ -1,0 +1,2 @@
+livef1==1.3.0
+websockets>=14,<17

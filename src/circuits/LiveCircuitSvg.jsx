@@ -45,7 +45,7 @@ const SETTINGS = {
 // GPS HELPERS
 // ============================================
 
-function getDriverPosition(driver) {
+function getDriverPosition(driver, clockMs) {
   const gps = driver.gps ?? driver;
 
   const x = Number(gps.X ?? gps.x);
@@ -64,7 +64,7 @@ function getDriverPosition(driver) {
     const parsedTime = Date.parse(timestamp);
 
     if (Number.isFinite(parsedTime)) {
-      const age = Date.now() - parsedTime;
+      const age = clockMs - parsedTime;
 
       if (age > SETTINGS.maxGpsAgeMs) {
         return null;
@@ -111,6 +111,7 @@ function getDriverLabel(driver) {
 
 export default function LiveCircuitSvg({
   circuitName = "Austin",
+  clockMs,
   drivers = [],
   selectedDriver = null,
   onSelectDriver,
@@ -198,7 +199,7 @@ export default function LiveCircuitSvg({
 
     return drivers
       .map((driver) => {
-        const gps = getDriverPosition(driver);
+        const gps = getDriverPosition(driver, clockMs);
 
         if (!gps) return null;
 
@@ -216,7 +217,7 @@ export default function LiveCircuitSvg({
         };
       })
       .filter(Boolean);
-  }, [drivers, map]);
+  }, [drivers, map, clockMs]);
 
   if (!circuit) {
     return (

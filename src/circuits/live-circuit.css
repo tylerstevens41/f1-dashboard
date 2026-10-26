@@ -1,0 +1,9 @@
+.live-circuit-shell { width:100%;height:100%;min-height:0;display:flex;flex-direction:column;background:#0b0d12;border-radius:10px;overflow:hidden; }
+.live-circuit-toolbar { display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:10px;border-bottom:1px solid #252932;font-size:11px;flex:0 0 auto; }
+.calibration-status { color:#ffbf47;font-size:10px; }
+.calibration-status.verified { color:#40d98a; }
+.calibration-debug-panel { flex:0 0 auto;max-height:160px;overflow:auto;padding:10px;font-size:10px;background:#161d27; }
+.calibration-layer-controls { display:flex;flex-wrap:wrap;gap:10px; }
+.live-circuit-viewport { flex:1;min-height:160px;min-width:0;padding:8px;overflow:hidden; }
+.live-circuit-bottom { padding:8px;font-size:9px;color:#aab2c0;flex:0 0 auto; }
+.calibration-error { color:#ffbf47;font-size:10px;padding:4px 10px; }

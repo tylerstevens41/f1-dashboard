@@ -1,431 +1,85 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import CircuitRenderer from './CircuitRenderer';
+import CalibrationLayers, { LayerControls } from './CalibrationLayers';
+import { calibrationGeometry, validateCalibration } from './calibration';
+import austin from './tracks/austin';
+import './live-circuit.css';
 
-import CircuitRenderer from "./CircuitRenderer";
-import { createGeometry } from "./geometry";
-import austin from "./tracks/austin";
+const CIRCUITS={Austin:austin};
 
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-
-// ============================================
-// CONFIGURATION
-// ============================================
-
-const CIRCUITS = { Austin: austin };
-
-// Change these to adjust the appearance.
-
-const SETTINGS = {
-  mapPadding: 650,
-
-  // Much larger driver markers
-  markerRadius: 260,
-  selectedMarkerRadius: 310,
-  markerBorderWidth: 35,
-
-  // Larger driver labels
-  labelWidth: 750,
-  labelHeight: 250,
-  labelFontSize: 185,
-
-  // Longer smoothing interval
-  animationDuration: 3000,
-
-  maxGpsAgeMs: 20000,
-  maxJumpDistance: 3000,
-
-  trackOuterWidth: 330,
-  trackInnerWidth: 160,
-};
-
-
-// ============================================
-// GPS HELPERS
-// ============================================
-
-function getDriverPosition(driver, clockMs) {
-  const gps = driver.gps ?? driver;
-
-  const x = Number(gps.X ?? gps.x);
-  const y = Number(gps.Y ?? gps.y);
-
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    return null;
-  }
-
-  const timestamp =
-    gps.Utc ??
-    gps.utc ??
-    gps.timestamp;
-
-  if (timestamp) {
-    const parsedTime = Date.parse(timestamp);
-
-    if (Number.isFinite(parsedTime)) {
-      const age = clockMs - parsedTime;
-
-      if (age > SETTINGS.maxGpsAgeMs) {
-        return null;
-      }
+export default function LiveCircuitSvg({ circuitName='Austin', clockMs, mode='LIVE', playback='playing', speed=1,
+  drivers=[], selectedDriver=null, onSelectDriver }) {
+  const circuit=CIRCUITS[circuitName];
+  const [loaded,setLoaded]=useState(null);
+  const [error,setError]=useState('');
+  const [revision,setRevision]=useState(0);
+  const [debug,setDebug]=useState(false);
+  const [labels,setLabels]=useState(true);
+  const [layers,setLayers]=useState({outline:true,raw:false,transformed:false,alignedSvg:false,original:false,drivers:true});
+  const clockRef=useRef({time:0,receivedAt:0,running:false,speed:1});
+  useEffect(()=>{
+    clockRef.current={time:clockMs,receivedAt:performance.now(),running:mode==='LIVE'||playback==='playing',speed:mode==='LIVE'?1:speed};
+  },[clockMs,mode,playback,speed]);
+  useEffect(()=>{
+    if(!circuit)return;
+    const controller=new AbortController();
+    async function load(){
+      try{
+        const reference=await fetch(circuit.sources.livef1.referenceFile,{signal:controller.signal,cache:'no-store'});
+        if(!reference.ok)throw new Error('GPS reference unavailable');
+        const legacy=await reference.json();
+        let calibration=null;
+        let warning='';
+        const response=await fetch(circuit.calibrationFile,{signal:controller.signal,cache:'no-store'});
+        if(response.ok && response.headers.get('content-type')?.includes('json')){
+          try{calibration=validateCalibration(await response.json(),circuit.id,circuit.layoutVersion);}
+          catch(err){warning=`Invalid calibration: ${err.message}. Using unverified legacy reference.`;}
+        }else if(response.status!==404 && response.headers.get('content-type')?.includes('json')){
+          warning=`Calibration unavailable (HTTP ${response.status}); using unverified legacy reference.`;
+        }
+        if(!controller.signal.aborted){setLoaded({legacy:legacy.points,calibration});setError(warning);}
+      }catch(err){if(err.name!=='AbortError')setError(err.message);}
     }
-  }
-
-  return {
-    x,
-    y,
-    status: gps.Status ?? gps.status ?? "",
-    timestamp,
-  };
-}
-
-function getTeamColor(driver) {
-  const raw = String(
-    driver.team_colour ??
-    driver.TeamColour ??
-    "FFFFFF"
-  ).replace("#", "");
-
-  return /^[0-9a-fA-F]{6}$/.test(raw)
-    ? `#${raw}`
-    : "#FFFFFF";
-}
-
-function getDriverLabel(driver) {
-  return (
-    driver.name_acronym ??
-    driver.Tla ??
-    driver.driver_number ??
-    "?"
-  );
-}
-
-// ============================================
-// ANIMATED DRIVER MARKER
-// ============================================
-
-// ============================================
-// MAIN CIRCUIT COMPONENT
-// ============================================
-
-export default function LiveCircuitSvg({
-  circuitName = "Austin",
-  clockMs,
-  drivers = [],
-  selectedDriver = null,
-  onSelectDriver,
-}) {
-  const [referencePoints, setReferencePoints] =
-    useState([]);
-
-  const [loadError, setLoadError] = useState("");
-
-  const [showDrivers, setShowDrivers] =
-    useState(true);
-
-  const [showLabels, setShowLabels] =
-    useState(true);
-
-  const [showReference, setShowReference] =
-    useState(false);
-
-  const circuit = CIRCUITS[circuitName];
-
-  // Load the recorded Austin GPS reference.
-  useEffect(() => {
-    if (!circuit) return;
-
-    let cancelled = false;
-
-    async function loadReference() {
-      try {
-        setLoadError("");
-        setReferencePoints([]);
-
-        const response = await fetch(
-          circuit.sources.livef1.referenceFile
-        );
-
-        if (!response.ok) {
-          throw new Error(
-            `GPS file not found: ${circuit.sources.livef1.referenceFile} (HTTP ${response.status})`
-          );
-        }
-
-        const contentType =
-          response.headers.get("content-type") ?? "";
-
-        if (
-          !contentType.includes("json")
-        ) {
-          throw new Error(
-            `Expected JSON at ${circuit.sources.livef1.referenceFile}, but received ${contentType || "unknown content type"}.`
-          );
-        }
-
-        const data = await response.json();
-
-        if (!Array.isArray(data.points)) {
-          throw new Error(
-            "GPS reference has no points array."
-          );
-        }
-
-        if (!cancelled) {
-          setReferencePoints(data.points);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setLoadError(error.message);
-        }
-      }
-    }
-
-    loadReference();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [circuit]);
-
-  const map = useMemo(() => {
-    return createGeometry(referencePoints, { matrix: circuit?.sources.livef1.matrix });
-  }, [referencePoints, circuit]);
-
-  // Convert incoming driver positions into SVG space.
-  const driverMarkers = useMemo(() => {
-    if (!map) return [];
-
-    return drivers
-      .map((driver) => {
-        const gps = getDriverPosition(driver, clockMs);
-
-        if (!gps) return null;
-
-        const point = map.project(
-          gps.x,
-          gps.y
-        );
-
-        return {
-          ...driver,
-          ...point,
-          color: getTeamColor(driver),
-          label: getDriverLabel(driver),
-          status: gps.status,
-        };
-      })
-      .filter(Boolean);
-  }, [drivers, map, clockMs]);
-
-  if (!circuit) {
-    return (
-      <div style={styles.error}>
-        No circuit configured for {circuitName}.
-      </div>
-    );
-  }
-
-  return (
-    <div style={styles.container}>
-      {/* HEADER */}
-      <div style={styles.header}>
-        <div>
-          <div style={styles.title}>
-            {circuit.name}
-          </div>
-
-          <div style={styles.subtitle}>
-            LIVE GPS CIRCUIT TRACKER
-          </div>
-        </div>
-
-        <div style={styles.controls}>
-          <label style={styles.control}>
-            <input
-              type="checkbox"
-              checked={showDrivers}
-              onChange={(event) =>
-                setShowDrivers(event.target.checked)
-              }
-            />
-            Drivers
-          </label>
-
-          <label style={styles.control}>
-            <input
-              type="checkbox"
-              checked={showLabels}
-              onChange={(event) =>
-                setShowLabels(event.target.checked)
-              }
-            />
-            Labels
-          </label>
-
-          <label style={styles.control}>
-            <input
-              type="checkbox"
-              checked={showReference}
-              onChange={(event) =>
-                setShowReference(event.target.checked)
-              }
-            />
-            GPS points
-          </label>
-        </div>
-      </div>
-
-      {/* ERROR */}
-      {loadError && (
-        <div style={styles.error}>
-          {loadError}
-        </div>
-      )}
-
-      {/* LOADING */}
-      {!map && !loadError && (
-        <div style={styles.loading}>
-          Loading circuit geometry...
-        </div>
-      )}
-
-      {/* CIRCUIT */}
-      {map && (
-        <div style={styles.mapArea}>
-          <CircuitRenderer geometry={map} circuit={circuit} drivers={showDrivers ? driverMarkers : []}
-            selectedDriver={selectedDriver} onSelectDriver={onSelectDriver} showLabels={showLabels}
-            showReference={showReference} animate />
-        </div>
-      )}
-
-      {/* FOOTER */}
-      <div style={styles.footer}>
-        <span>
-          {driverMarkers.length} live driver positions
-        </span>
-
-        <span>
-          {referencePoints.length} reference GPS points
-        </span>
-      </div>
-
-      {selectedDriver && (
-        <div style={styles.selected}>
-          Selected driver: #{selectedDriver}
-        </div>
-      )}
-
-      <div style={styles.note}>
-        Live driver markers update from the
-        LiveF1 GPS feed. Movement is animated
-        between incoming positions.
-      </div>
+    load();return()=>controller.abort();
+  },[circuit,revision]);
+  const geometry=useMemo(()=>loaded?calibrationGeometry(loaded.calibration,loaded.legacy):null,[loaded]);
+  const markers=useMemo(()=>{
+    if(!geometry)return [];
+    return drivers.flatMap(driver=>{
+      const gps=driver.gps;
+      if(!gps || !Number.isFinite(gps.X)||!Number.isFinite(gps.Y)||!Number.isFinite(gps._sampleTimeMs))return [];
+      if(clockMs-gps._sampleTimeMs>circuit.motion.staleMs||gps._sampleTimeMs-clockMs>2000)return [];
+      const point=geometry.project(gps.X,gps.Y);
+      const raw=String(driver.team_colour??'FFFFFF').replace('#','');
+      return [{...driver,...point,rawX:gps.X,rawY:gps.Y,sampleTime:gps._sampleTimeMs,history:gps._history,
+        color:/^[0-9a-f]{6}$/i.test(raw)?`#${raw}`:'#FFFFFF',label:driver.name_acronym??driver.driver_number}];
+    });
+  },[drivers,geometry,clockMs,circuit]);
+  if(!circuit)return <p>No configured circuit for {circuitName}.</p>;
+  const calibration=loaded?.calibration;
+  const status=calibration?.status??'missing';
+  return <div className="live-circuit-shell">
+    <div className="live-circuit-toolbar"><strong>{circuit.name}</strong>
+      <span className={`calibration-status ${status}`}>Calibration: {status==='candidate'?'unverified candidate':status}</span>
+      <label><input type="checkbox" checked={labels} onChange={e=>setLabels(e.target.checked)}/>Labels</label>
+      {import.meta.env.DEV && <button aria-pressed={debug} onClick={()=>setDebug(v=>!v)}>GPS calibration overlay</button>}
     </div>
-  );
+    {import.meta.env.DEV && debug && <div className="calibration-debug-panel">
+      <LayerControls layers={layers} setLayers={setLayers}/>
+      <p>Orange: raw/native GPS. Cyan: accepted GPS after mapping. Purple: original SVG registered to GPS. Unregistered SVG is a visual comparison only.</p>
+      <p>{calibration?`Layout ${calibration.layoutVersion} · ${calibration.svgComparison?.decision} · held-out p95 ${calibration.validation?.heldOut?.p95?.toFixed(1)} feed units`:'No calibration artifact. Run the local collection/build commands; legacy reference is unverified.'}</p>
+      <p>Start/finish: {calibration?.startFinish?.status??'not established'}. No car is snapped to this path.</p>
+      <button onClick={()=>setRevision(v=>v+1)}>Reload calibration JSON</button>
+    </div>}
+    {error && <p role="alert" className="calibration-error">{error}</p>}
+    <div className="live-circuit-viewport">
+      {geometry?<CircuitRenderer geometry={geometry} circuit={circuit} drivers={layers.drivers?markers:[]}
+        selectedDriver={selectedDriver} onSelectDriver={onSelectDriver} animate clockRef={clockRef} motionOptions={circuit.motion}
+        showLabels={labels} showTrack={!debug||layers.outline} annotations={calibration ? {...calibration.annotations,startFinish:{...calibration.startFinish,label:'START / FINISH'}} : circuit.annotations}
+        annotationsCalibrated={status==='verified'}>
+        {import.meta.env.DEV && debug && <CalibrationLayers calibration={calibration} geometry={geometry} circuit={circuit} layers={layers}/>}
+      </CircuitRenderer>:<p>Loading circuit geometry…</p>}
+    </div>
+    <div className="live-circuit-bottom">{markers.length} drivers with fresh GPS · {mode} · 250 ms interpolation buffer · {status!=='verified'?'alignment not verified':'validated layout; recheck after event/layout changes'}</div>
+  </div>;
 }
-
-// ============================================
-// STYLES
-// ============================================
-
-const styles = {
-  container: {
-    width: "100%",
-    background: "#0b0d12",
-    color: "#ffffff",
-    borderRadius: 12,
-    overflow: "hidden",
-    display: "flex",
-    flexDirection: "column",
-  },
-
-  header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    gap: 15,
-    padding: 18,
-    borderBottom: "1px solid #252932",
-  },
-
-  title: {
-    fontSize: 17,
-    fontWeight: 800,
-  },
-
-  subtitle: {
-    fontSize: 10,
-    color: "#939dad",
-    marginTop: 5,
-    letterSpacing: 1,
-  },
-
-  controls: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: 12,
-  },
-
-  control: {
-    display: "flex",
-    alignItems: "center",
-    gap: 5,
-    fontSize: 11,
-    cursor: "pointer",
-  },
-
-  mapArea: {
-    width: "100%",
-    height: 520,
-    padding: 20,
-    boxSizing: "border-box",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-
-  svg: {
-    width: "100%",
-    height: "100%",
-    display: "block",
-    overflow: "visible",
-  },
-
-  footer: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 10,
-    padding: "12px 18px",
-    borderTop: "1px solid #252932",
-    color: "#aab2c0",
-    fontSize: 11,
-  },
-
-  selected: {
-    padding: "8px 18px",
-    color: "#ffffff",
-    fontSize: 11,
-  },
-
-  note: {
-    padding: "8px 18px 15px",
-    color: "#7d8797",
-    fontSize: 10,
-    lineHeight: 1.5,
-  },
-
-  loading: {
-    padding: 50,
-    textAlign: "center",
-    color: "#aab2c0",
-  },
-
-  error: {
-    padding: 20,
-    color: "#ff7070",
-  },
-};

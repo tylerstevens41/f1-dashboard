@@ -48,7 +48,14 @@ def decode(topic, payload, timestamp=None):
     if topic in ('Position.z', 'CarData.z'):
         from livef1.data_processing.etl import function_map
         records = list(function_map[topic]([(timestamp, payload)], None))
-        return {str(r['DriverNo']): r for r in records}
+        drivers = {}
+        for record in records:
+            number = str(record['DriverNo'])
+            previous = drivers.get(number)
+            batch = (previous or {}).get('_batch', []) + [record]
+            newest = max(batch, key=lambda r: utc_ms(r.get('Utc')) or -math.inf)
+            drivers[number] = {**newest, '_batch': batch} if topic == 'Position.z' else newest
+        return drivers
     if not isinstance(payload, dict):
         raise ValueError('Expected raw topic object')
     if topic in ('TimingData', 'TimingAppData'):
@@ -127,11 +134,24 @@ class RaceState:
                     and math.isfinite(record[k]) for k in ('X', 'Y')
                 ):
                     continue
-                accepted[number] = {**record, '_sampleTimeMs': sample_time}
+                history = list(old.get('_history', []))
+                for sample in sorted(record.get('_batch', [record]), key=lambda r: utc_ms(r.get('Utc')) or 0):
+                    t = utc_ms(sample.get('Utc'))
+                    if t is None or (history and t <= history[-1]['time']):
+                        continue
+                    if all(isinstance(sample.get(k),(int,float)) and not isinstance(sample[k],bool) and math.isfinite(sample[k]) for k in ('X','Y')):
+                        history.append({'time':t,'x':sample['X'],'y':sample['Y']})
+                accepted[number] = {k:v for k,v in record.items() if k != '_batch'}
+                accepted[number]['_sampleTimeMs'] = sample_time
+                if topic == 'Position.z':
+                    accepted[number]['_history'] = history[-24:]
             data = accepted
             if not data:
                 return messages
         self.topics[topic] = merge(previous, data)
+        if topic == 'Position.z':
+            for number,record in data.items():
+                self.topics[topic][number]['_history'] = record['_history']
         if topic == 'RaceControlMessages':
             all_messages = self.topics[topic].get('Messages', {})
             if isinstance(all_messages, dict):

@@ -20,5 +20,13 @@ test('shared renderer supports replay markers, calibrated features and flags', a
     assert.equal((markup.match(/pathLength="1"/g) ?? []).length,2);
     const uncalibrated = renderToStaticMarkup(createElement(Renderer, {...props,annotationsCalibrated:false}));
     assert.doesNotMatch(uncalibrated,/T1/);
+    const animated = renderToStaticMarkup(createElement(Renderer, {...props,animate:true,clockRef:{current:{time:1000,receivedAt:0,running:false,speed:1}},motionOptions:austin.motion}));
+    assert.match(animated,/data-driver="1"/);
+    assert.match(animated,/VER/);
+    assert.match(animated,/visibility:hidden/);
+    const { default: Layers } = await server.ssrLoadModule('/src/circuits/CalibrationLayers.jsx');
+    const overlay=renderToStaticMarkup(createElement(Layers,{geometry,circuit:austin,calibration:{debug:{raw:[[0,0]],accepted:[[10,10]]}},layers:{raw:true,transformed:true,original:true}}));
+    assert.match(overlay,/austin.svg/);
+    assert.match(overlay,/#ff8040/);
   } finally { await server.close(); }
 });

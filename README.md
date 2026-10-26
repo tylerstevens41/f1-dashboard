@@ -27,3 +27,5 @@ python -m unittest discover -s bridge/tests -v
 ```
 
 Legacy OpenF1 playback remains available only in development until the LiveF1 replacement is verified. No archive data or credentials are bundled.
+
+GPS calibration phase: [Milestone 2 workflow and exact PowerShell commands](docs/livef1-milestone-2.md). Generated Austin calibration remains local/unverified until real held-out trajectories and visual/start-line checks pass.

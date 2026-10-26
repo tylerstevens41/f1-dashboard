@@ -24,14 +24,14 @@ export default function LiveRace() {
           {mode === "live" ? "● LIVE" : "LIVE"}
         </button>
 
-        <button
+        {import.meta.env.DEV && <button
           type="button"
           onClick={() => setMode("replay")}
           aria-pressed={mode === "replay"}
         >
-          {mode === "replay" ? "● REPLAY" : "REPLAY"}
-        </button>
-        <button type="button" onClick={() => setMode("austin")} aria-pressed={mode === "austin"}>Austin Replay</button>
+          {mode === "replay" ? "● LEGACY OPENF1" : "LEGACY OPENF1"}
+        </button>}
+        {import.meta.env.DEV && <button type="button" onClick={() => setMode("austin")} aria-pressed={mode === "austin"}>Legacy Austin Replay</button>}
       </div>
 
       {mode === "live" ? <LiveSession /> : mode === "austin" ? <AustinReplay /> : <ReplayRace />}

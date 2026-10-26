@@ -1,12 +1,13 @@
+import useRaceFeed from "./race/useRaceFeed";
+import RaceDevTools from "./race/RaceDevTools";
+import { flattenRecord, selectCircuit, validGps, tyrePresentation } from "./race/state";
 
 import {
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 
-import austin from "./circuits/tracks/austin";
 import LiveCircuitSvg from "./circuits/LiveCircuitSvg";
 
 import "./LiveRace.css";
@@ -16,7 +17,8 @@ import "./TimingTower.css";
 // CONFIGURATION
 // ============================================
 
-const WS_URL = "ws://127.0.0.1:8765";
+
+const EMPTY = Object.freeze({});
 
 const TEAM_LOGOS = {
   mercedes: "mercedes",
@@ -40,69 +42,6 @@ const TEAM_LOGOS = {
 // ============================================
 // DATA HELPERS
 // ============================================
-
-function asRecords(payload) {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  if (!payload || typeof payload !== "object") {
-    return [];
-  }
-
-  if (
-    payload.DriverNo !== undefined ||
-    payload.RacingNumber !== undefined
-  ) {
-    return [payload];
-  }
-
-  return Object.entries(payload).map(([key, value]) => {
-    if (!value || typeof value !== "object") {
-      return value;
-    }
-
-    return {
-      ...value,
-      DriverNo:
-        value.DriverNo ??
-        value.RacingNumber ??
-        key,
-    };
-  });
-}
-
-function getDriverNumber(record) {
-  const number =
-    record?.DriverNo ??
-    record?.RacingNumber ??
-    record?.driver_number;
-
-  return number == null ? null : String(number);
-}
-
-function mergeByDriver(previous, payload) {
-  const next = { ...previous };
-
-  for (const record of asRecords(payload)) {
-    if (!record || typeof record !== "object") {
-      continue;
-    }
-
-    const number = getDriverNumber(record);
-
-    if (!number) {
-      continue;
-    }
-
-    next[number] = {
-      ...(next[number] ?? {}),
-      ...record,
-    };
-  }
-
-  return next;
-}
 
 function readField(record, path) {
   if (!record) {
@@ -390,34 +329,19 @@ function getSessionType(session) {
 // ============================================
 
 export default function LiveSession() {
-  const [connection, setConnection] =
-    useState("connecting");
-
-  const [session, setSession] =
-    useState({});
-
-  const [driversByNumber, setDriversByNumber] =
-    useState({});
-
-  const [timingByNumber, setTimingByNumber] =
-    useState({});
-
-  const [tyresByNumber, setTyresByNumber] =
-    useState({});
-
-  const [positionsByNumber, setPositionsByNumber] =
-    useState({});
-
+  const feed = useRaceFeed();
+  const { race, connection, clockMs } = feed;
+  const session = race.topics.SessionInfo ?? EMPTY;
+  const driversByNumber = race.topics.DriverList ?? EMPTY;
+  const timingByNumber = race.topics.TimingData ?? EMPTY;
+  const tyresByNumber = race.topics.TimingAppData ?? EMPTY;
+  const positionsByNumber = race.topics["Position.z"] ?? EMPTY;
   const [selectedDriver, setSelectedDriver] =
-    useState(null);
-
-  const [lastUpdate, setLastUpdate] =
     useState(null);
 
   const [viewportHeight, setViewportHeight] =
     useState(window.innerHeight);
 
-  const socketRef = useRef(null);
 
   // ==========================================
   // RESPONSIVE HEIGHT
@@ -442,120 +366,6 @@ export default function LiveSession() {
   }, []);
 
   // ==========================================
-  // WEBSOCKET CONNECTION
-  // ==========================================
-
-  useEffect(() => {
-    let active = true;
-    let reconnectTimer;
-
-    function connect() {
-      if (!active) {
-        return;
-      }
-
-      setConnection("connecting");
-
-      const socket = new WebSocket(WS_URL);
-
-      socketRef.current = socket;
-
-      socket.onopen = () => {
-        if (active) {
-          setConnection("connected");
-        }
-      };
-
-      socket.onmessage = (event) => {
-        if (!active) {
-          return;
-        }
-
-        let message;
-
-        try {
-          message = JSON.parse(event.data);
-        } catch {
-          return;
-        }
-
-        const { topic, records } = message;
-
-        if (topic === "SessionInfo") {
-          const nextSession = Array.isArray(records)
-            ? records[0]
-            : records;
-
-          if (
-            nextSession &&
-            typeof nextSession === "object"
-          ) {
-            setSession((previous) => ({
-              ...previous,
-              ...nextSession,
-            }));
-          }
-        }
-
-        if (topic === "DriverList") {
-          setDriversByNumber((previous) =>
-            mergeByDriver(previous, records)
-          );
-        }
-
-        if (topic === "TimingData") {
-          setTimingByNumber((previous) =>
-            mergeByDriver(previous, records)
-          );
-        }
-
-        if (topic === "TimingAppData") {
-          setTyresByNumber((previous) =>
-            mergeByDriver(previous, records)
-          );
-        }
-
-        if (topic === "Position.z") {
-          setPositionsByNumber((previous) =>
-            mergeByDriver(previous, records)
-          );
-        }
-
-        setLastUpdate(new Date());
-      };
-
-      socket.onerror = () => {
-        if (active) {
-          setConnection("error");
-        }
-      };
-
-      socket.onclose = () => {
-        if (!active) {
-          return;
-        }
-
-        setConnection("disconnected");
-
-        reconnectTimer = setTimeout(
-          connect,
-          3000
-        );
-      };
-    }
-
-    connect();
-
-    return () => {
-      active = false;
-
-      clearTimeout(reconnectTimer);
-
-      socketRef.current?.close();
-    };
-  }, []);
-
-  // ==========================================
   // BUILD DRIVER DATA
   // ==========================================
 
@@ -563,20 +373,14 @@ export default function LiveSession() {
     return Object.entries(driversByNumber)
       .map(([number, driver]) => {
         const timing =
-          timingByNumber[number] ?? {};
+          flattenRecord(timingByNumber[number] ?? {});
 
         const tyre =
-          tyresByNumber[number] ?? {};
+          tyrePresentation(tyresByNumber[number] ?? {});
 
         const rawPosition =
-          firstField(driver, [
-            "Line",
-            "Position",
-          ]) ??
-          firstField(timing, [
-            "Position",
-            "Line",
-          ]);
+          firstField(timing, ["Position", "Line"]) ??
+          firstField(driver, ["Position", "Line"]);
 
         const position = Number(rawPosition);
 
@@ -631,18 +435,7 @@ export default function LiveSession() {
     positionsByNumber,
   ]);
 
-  const gpsDrivers = useMemo(() => {
-    return drivers.filter((driver) => {
-      const gps = driver.gps;
-
-      return (
-        gps.X !== undefined ||
-        gps.Y !== undefined ||
-        gps.x !== undefined ||
-        gps.y !== undefined
-      );
-    });
-  }, [drivers]);
+  const gpsDrivers = useMemo(() => drivers.filter(driver => validGps(driver.gps, clockMs)), [drivers, clockMs]);
 
   // ==========================================
   // CIRCUIT
@@ -651,8 +444,8 @@ export default function LiveSession() {
   const sessionName = getSessionName(session);
   const sessionType = getSessionType(session);
 
-  // Austin is the only configured circuit.
-  const circuitName = austin.sources.livef1.sessionName;
+  // Never silently display Austin for another event.
+  const circuitName = selectCircuit(session);
 
   // ==========================================
   // AUTO-FIT TIMING TOWER
@@ -699,6 +492,8 @@ export default function LiveSession() {
         minHeight: 0,
       }}
     >
+      {import.meta.env.DEV && <RaceDevTools feed={feed} circuit={circuitName} />}
+      <div style={{ padding: "0 16px", color: race.mode === "TEST" ? "#ffd43b" : "#40d98a" }}>{race.mode === "TEST" ? "TEST · historical LiveF1 data" : "LIVE"} · {race.upstream}</div>
       {/* SESSION HEADER */}
       <div
         style={{
@@ -1028,12 +823,14 @@ export default function LiveSession() {
             minHeight: 0,
           }}
         >
-          <LiveCircuitSvg
+          {circuitName ? <LiveCircuitSvg
+            key={`${race.generation}-${circuitName}`}
+            clockMs={clockMs}
             circuitName={circuitName}
             drivers={gpsDrivers}
             selectedDriver={selectedDriver}
             onSelectDriver={setSelectedDriver}
-          />
+          /> : <p>No verified circuit mapping for this session. Timing remains available.</p>}
         </section>
       </div>
 
@@ -1048,8 +845,9 @@ export default function LiveSession() {
         {drivers.length} drivers loaded ·{" "}
         {gpsDrivers.length} drivers with GPS data
 
-        {lastUpdate &&
-          ` · Last update ${lastUpdate.toLocaleTimeString()}`}
+        {race.clockMs && ` · ${race.mode} · ${race.clockBasis === "relative" ? `${(race.clockMs / 1000).toFixed(1)}s (relative archive clock)` : new Date(race.clockMs).toLocaleTimeString()}`}
+        <p>{race.topics.TrackStatus?.Message ?? "Track status unavailable"} · {race.topics.SessionStatus?.Status ?? "Session status unavailable"}</p>
+        {Object.values(race.topics.RaceControlMessages?.Messages ?? {}).slice(-3).map((message, index) => <p key={index}>{message.Message}</p>)}
       </div>
     </main>
   );

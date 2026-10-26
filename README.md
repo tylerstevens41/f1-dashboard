@@ -1,16 +1,29 @@
-# React + Vite
+# F1 Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Existing React/Vite dashboard with a backend-only LiveF1 bridge.
 
-Currently, two official plugins are available:
+- [LIVE/TEST setup, Windows commands, protocol, verification limits and migration inventory](docs/livef1-milestone-1.md)
+- [Reusable circuit architecture](docs/circuit-system.md)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```sh
+npm ci
+npm run dev
+```
 
-## React Compiler
+Backend (separate terminal):
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```sh
+python -m pip install -r bridge/requirements.txt
+python -m bridge.server
+```
 
-## Expanding the ESLint configuration
+For development archives use `--login --idle --allow-test`, following the verification guide. Never put F1 credentials in frontend variables or commits. LiveF1 1.3.0 is pinned. Authenticated historical retrieval and Austin alignment must be verified locally; compilation is not proof of GPS accuracy.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```sh
+npm test
+npm run build
+npm run lint
+python -m unittest discover -s bridge/tests -v
+```
+
+Legacy OpenF1 playback remains available only in development until the LiveF1 replacement is verified. No archive data or credentials are bundled.

@@ -37,9 +37,19 @@ class Bridge:
     async def broadcast(self, message):
         await asyncio.gather(*(self.send(client, message) for client in tuple(self.clients)))
 
+    def playback_info(self):
+        if not self.clip:
+            return {}
+        return {'offsetMs':self.offset,'durationMs':self.clip['durationMs'],
+                'archiveStartSeconds':self.clip.get('startOffsetSeconds'),
+                'sessionPath':self.clip.get('sessionPath')}
+
+    def snapshot(self):
+        return {**self.state.snapshot(),'playbackInfo':self.playback_info()}
+
     async def status(self, status):
         self.state.upstream = status
-        await self.broadcast(self.state.envelope('status', error=self.error))
+        await self.broadcast(self.state.envelope('status', error=self.error, playbackInfo=self.playback_info()))
 
     async def emit(self, topic, payload, timestamp=None, clock_ms=None):
         if topic not in TOPICS:
@@ -50,7 +60,7 @@ class Bridge:
             messages = self.state.ingest(topic, payload, timestamp, clock_ms)
         except (ValueError, KeyError, TypeError):
             self.error = f'Invalid {topic} update; retained previous state.'
-            await self.broadcast(self.state.envelope('status', error=self.error))
+            await self.broadcast(self.state.envelope('status', error=self.error, playbackInfo=self.playback_info()))
             return
         for message in messages:
             await self.broadcast(message)
@@ -91,13 +101,13 @@ class Bridge:
         self.clip = None
         self.state.reset('LIVE')
         self.error = None
-        await self.broadcast(self.state.snapshot())
+        await self.broadcast(self.snapshot())
         self.source_task = asyncio.create_task(self.run_live())
 
     async def begin_live_snapshot(self):
         self.state.reset('LIVE')
         self.state.upstream = 'connected'
-        await self.broadcast(self.state.snapshot())
+        await self.broadcast(self.snapshot())
 
     async def run_live(self):
         try:
@@ -124,7 +134,7 @@ class Bridge:
         self.state.upstream = 'archive-ready'
         self.state.playback = 'paused'
         self.error = None
-        await self.broadcast(self.state.snapshot())
+        await self.broadcast(self.snapshot())
         self.last_tick = time.monotonic()
         self.source_task = asyncio.create_task(self.play_clip())
 
@@ -143,13 +153,13 @@ class Bridge:
             self.last_tick = now
             await asyncio.sleep(0.025)
         self.state.playback = 'ended'
-        await self.broadcast(self.state.envelope('status'))
+        await self.broadcast(self.state.envelope('status', playbackInfo=self.playback_info()))
 
     async def heartbeat(self):
         while True:
             if self.state.mode == 'LIVE':
                 self.state.clock_ms = datetime.now(timezone.utc).timestamp()*1000
-            await self.broadcast(self.state.envelope('status', error=self.error))
+            await self.broadcast(self.state.envelope('status', error=self.error, playbackInfo=self.playback_info()))
             await asyncio.sleep(1)
 
     async def command(self, client, command):
@@ -166,7 +176,11 @@ class Bridge:
                     await self.status('archive-loading')
                     clip = await asyncio.to_thread(fetch_clip, str(command['path']), float(command.get('start',0)), float(command.get('duration',120)))
                     await self.start_clip(clip)
-                elif action == 'play' and self.state.mode == 'TEST' and self.clip:
+                elif action == 'windows' and self.clip:
+                    from .windows import recommend_windows
+                    windows = await asyncio.to_thread(recommend_windows,self.clip)
+                    await self.send(client,{'version':1,'type':'windows','windows':windows})
+                elif action == 'play'  and self.state.mode == 'TEST' and self.clip:
                     if self.state.playback == 'ended':
                         await self.start_clip(self.clip)
                     self.state.playback = 'playing'
@@ -182,7 +196,7 @@ class Bridge:
                     await self.start_live()
                 else:
                     raise ValueError('Unsupported action')
-                await self.send(client,self.state.envelope('status'))
+                await self.send(client,self.state.envelope('status', playbackInfo=self.playback_info()))
             except Exception:
                 # Never send upstream exception text: auth libraries can include
                 # response bodies, URLs or account details in their exceptions.
@@ -192,7 +206,7 @@ class Bridge:
     async def connection(self, websocket):
         self.clients.add(websocket)
         try:
-            await self.send(websocket,self.state.snapshot())
+            await self.send(websocket,self.snapshot())
             await self.send(websocket, {'version':1,'type':'controls','enabled':self.allow_test})
             async for text in websocket:
                 try:

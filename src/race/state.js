@@ -10,7 +10,8 @@ export function raceReducer(state, message) {
   let next = message.type === 'snapshot' || message.generation !== state.generation ? initialRaceState() : state;
   next = { ...next, generation: message.generation, sequence: message.sequence, mode: message.mode,
     sessionId: message.sessionId, upstream: message.upstream, playback: message.playback,
-    speed: message.speed, clockMs: message.clockMs, clockBasis: message.clockBasis, error: message.error ?? null };
+    speed: message.speed, clockMs: message.clockMs, clockBasis: message.clockBasis,
+    playbackInfo: message.playbackInfo ?? next.playbackInfo, error: message.error ?? null };
   if (message.type === 'snapshot') return { ...next, topics: message.topics ?? {}, freshness: message.freshness ?? {}, capabilities: message.capabilities ?? {} };
   if (message.type === 'topic' && typeof message.topic === 'string' && message.data && typeof message.data === 'object') {
     return { ...next, topics: { ...next.topics, [message.topic]: message.data },

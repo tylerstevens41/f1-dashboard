@@ -223,7 +223,7 @@ def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/li
     origin = origin if origin is not None else 0
     initial = seed.topics
     clip = {'format': 'livef1-clip-v1', 'source': 'LiveF1', 'sessionPath': path,
-            'durationMs': duration_seconds * 1000, 'originMs': origin + start,
+            'startOffsetSeconds': start_seconds, 'durationMs': duration_seconds * 1000, 'originMs': origin + start,
             'capabilities': capabilities, 'initial': initial, 'events': events,
             'initialFreshness': {topic: origin + offset for topic, offset in seed.freshness.items()},
             'capturedAt': time.time(), 'clockBasis': 'gps-utc' if origin else 'relative'}

@@ -60,6 +60,18 @@ class ProtocolTests(unittest.TestCase):
         car = compressed({'Entries':[{'Utc':stamp,'Cars':{'1':{'Channels':{'2':12000,'0':300}}}}]})
         self.assertIn('1',decode('CarData.z',car))
 
+    def test_batched_gps_samples_remain_ordered_and_bounded(self):
+        state=RaceState('TEST')
+        positions=[]
+        for i in range(30):
+            positions.append({'Timestamp':f'2024-10-20T19:00:{i:02d}Z','Entries':{'1':{'X':10+i,'Y':20,'Status':'OnTrack'}}})
+        state.ingest('Position.z',compressed({'Position':positions}),clock_ms=utc_ms('2024-10-20T19:00:29Z'))
+        history=state.topics['Position.z']['1']['_history']
+        self.assertIsInstance(history,list)
+        self.assertEqual(len(history),24)
+        self.assertEqual(history[-1]['x'],39)
+        self.assertTrue(all(a['time']<b['time'] for a,b in zip(history,history[1:])))
+
     def test_bounded_race_control(self):
         state = RaceState()
         for i in range(130):

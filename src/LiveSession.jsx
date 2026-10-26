@@ -3,7 +3,6 @@ import RaceDevTools from "./race/RaceDevTools";
 import { flattenRecord, selectCircuit, validGps, tyrePresentation } from "./race/state";
 
 import {
-  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -19,6 +18,9 @@ import "./TimingTower.css";
 
 
 const EMPTY = Object.freeze({});
+function playbackClock(ms) {
+  return Number.isFinite(ms) ? `${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}` : '—';
+}
 
 const TEAM_LOGOS = {
   mercedes: "mercedes",
@@ -339,32 +341,6 @@ export default function LiveSession() {
   const [selectedDriver, setSelectedDriver] =
     useState(null);
 
-  const [viewportHeight, setViewportHeight] =
-    useState(window.innerHeight);
-
-
-  // ==========================================
-  // RESPONSIVE HEIGHT
-  // ==========================================
-
-  useEffect(() => {
-    const updateHeight = () => {
-      setViewportHeight(window.innerHeight);
-    };
-
-    window.addEventListener(
-      "resize",
-      updateHeight
-    );
-
-    return () => {
-      window.removeEventListener(
-        "resize",
-        updateHeight
-      );
-    };
-  }, []);
-
   // ==========================================
   // BUILD DRIVER DATA
   // ==========================================
@@ -447,38 +423,9 @@ export default function LiveSession() {
   // Never silently display Austin for another event.
   const circuitName = selectCircuit(session);
 
-  // ==========================================
-  // AUTO-FIT TIMING TOWER
-  // ==========================================
-
-  // Reserve room for the navigation, header,
-  // and surrounding page content.
-  const availableTowerHeight = Math.max(
-    480,
-    viewportHeight - 190
-  );
-
-  const towerHeaderHeight = 42;
-  const columnHeaderHeight = 30;
-
-  const driverCount = Math.max(
-    drivers.length,
-    22
-  );
-
-  const rowHeight = Math.max(
-    20,
-    Math.min(
-      31,
-      Math.floor(
-        (
-          availableTowerHeight -
-          towerHeaderHeight -
-          columnHeaderHeight
-        ) / driverCount
-      )
-    )
-  );
+  const towerHeaderHeight = 36;
+  const columnHeaderHeight = 26;
+  const rowHeight = `clamp(18px, calc((100dvh - 270px) / ${Math.max(22,drivers.length)}), 30px)`;
 
   // ==========================================
   // RENDER
@@ -486,14 +433,14 @@ export default function LiveSession() {
 
   return (
     <main
-      className="live-race-page"
+      className="live-race-page live-session-page"
       style={{
         color: "#ffffff",
         minHeight: 0,
       }}
     >
       {import.meta.env.DEV && <RaceDevTools feed={feed} circuit={circuitName} />}
-      <div style={{ padding: "0 16px", color: race.mode === "TEST" ? "#ffd43b" : "#40d98a" }}>{race.mode === "TEST" ? "TEST · historical LiveF1 data" : "LIVE"} · {race.upstream}</div>
+      <div style={{ padding: "0 16px", color: race.mode === "TEST" ? "#ffd43b" : "#40d98a" }}>{race.mode === "TEST" ? "TEST · historical LiveF1 data" : "LIVE"} · {race.upstream}{race.mode === 'TEST' && ` · ${race.playback} · ${playbackClock(race.playbackInfo?.offsetMs)} / ${playbackClock(race.playbackInfo?.durationMs)}`}</div>
       {/* SESSION HEADER */}
       <div
         style={{
@@ -542,24 +489,25 @@ export default function LiveSession() {
 
       {/* MAIN DASHBOARD GRID */}
       <div
+        className="live-session-layout"
         style={{
           display: "grid",
           gridTemplateColumns:
             "minmax(440px, 43%) minmax(0, 1fr)",
           gap: 12,
           padding: "0 16px 12px",
-          alignItems: "start",
+          alignItems: "stretch",
         }}
       >
         {/* TIMING TOWER */}
         <aside
-          className="timing-tower f1-timing-tower"
+          className="timing-tower f1-timing-tower live-session-tower"
           style={{
             background: "#0c0e13",
             borderRadius: 10,
             overflow: "hidden",
             minWidth: 0,
-            height: availableTowerHeight,
+            height: "100%",
             display: "flex",
             flexDirection: "column",
           }}
@@ -826,6 +774,9 @@ export default function LiveSession() {
           {circuitName ? <LiveCircuitSvg
             key={`${race.generation}-${circuitName}`}
             clockMs={clockMs}
+            mode={race.mode}
+            playback={race.playback}
+            speed={race.speed}
             circuitName={circuitName}
             drivers={gpsDrivers}
             selectedDriver={selectedDriver}
@@ -836,8 +787,9 @@ export default function LiveSession() {
 
       {/* FOOTER */}
       <div
+        className="live-session-footer"
         style={{
-          padding: "0 16px 12px",
+          padding: "0 16px 6px",
           color: "#939ba9",
           fontSize: 10,
         }}

@@ -66,3 +66,35 @@ test('trace distinguishes GPS quantization and corner chord effects from clock-r
   assert.ok(e.trace.every(row=>Math.abs(row.presentationRate-1)<1e-9));
   assert.match(e.traceCsv(),/phaseErrorMs/);assert.match(e.traceCsv(),/sourceIntervalMs/);
 });
+
+test('Austin trace regression: late 280 ms GPS segment after a 194 ms hold never draws the accumulated jump',()=>{
+  const e=new AnimationEngine();e.ingest(packet('snapshot',2000,1,{topics:{}}),0);e.setBuffer(1000);e.setTracing(true);
+  e.add('1',{time:700,x:0,y:0});e.add('1',{time:1000,x:209.1,y:0});
+  e.frame(0);e.frame(6);e.frame(194);
+  assert.equal(e.lastFrame.get('1').state,'waiting');
+  e.add('1',{time:1280,x:404.28,y:0});e.add('1',{time:1600,x:627.35,y:0});
+  assert.equal(e.frame(200).get('1').state,'recovering');
+  assert.equal(e.lastFrame.get('1').point,null);
+  e.frame(300);assert.equal(e.lastFrame.get('1').point,null);
+  e.frame(350);assert.equal(e.lastFrame.get('1').state,'interpolating');
+  e.frame(356);
+  assert.ok(e.trace.every(row=>row.renderedChordSpeed<1000));
+  assert.ok(e.trace.filter(row=>row.state==='waiting').every(row=>row.sourcePathSpeed===null));
+});
+
+test('automatic recommendation accounts for actual GPS delivery age and manual remains explicit',()=>{
+  const e=new AnimationEngine();e.ingest(packet('snapshot',10000,1,{topics:{}}),0);
+  e.ingest(packet('topic',9000,2,{topic:'Position.z',data:{1:{_history:[{time:8500,x:0,y:0},{time:8700,x:100,y:0}]}}}),0);
+  assert.equal(e.diagnostics(0).deliveryAgeMs,1300);
+  assert.ok(e.bufferMs()>=1500);
+  e.setBuffer(1000);assert.equal(e.bufferMs(),1000);
+});
+
+test('repeated underrun during reacquisition stays hidden until interpolation is stable',()=>{
+  const e=new AnimationEngine();e.ingest(packet('snapshot',2000,1,{topics:{}}),0);e.setBuffer(1000);
+  e.add('1',{time:700,x:0,y:0});e.add('1',{time:1000,x:100,y:0});e.frame(0);e.frame(100);
+  e.add('1',{time:1150,x:150,y:0});assert.equal(e.frame(110).get('1').state,'recovering');
+  assert.equal(e.frame(160).get('1').point,null);assert.equal(e.frame(170).get('1').point,null);
+  e.add('1',{time:1600,x:300,y:0});assert.equal(e.frame(180).get('1').point,null);
+  assert.equal(e.frame(330).get('1').state,'interpolating');
+});

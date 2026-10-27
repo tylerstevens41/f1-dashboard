@@ -28,6 +28,7 @@ export class AnimationEngine {
     this.jitter = [];
     this.arrival = null;
     this.deliveryIntervals = [];
+    this.deliveryAges = [];
     this.underruns = 0;
     this.lastFrame = new Map();
     this.targetDelay = 0;
@@ -111,7 +112,11 @@ export class AnimationEngine {
         const variation = Math.max(0,(now-this.arrival.wall)*this.speed-(newest-this.arrival.source));
         this.jitter = [...this.jitter,variation].slice(-80);
       }
-      if (!this.arrival || newest > this.arrival.source) this.arrival = {wall:now,source:newest};
+      if (!this.arrival || newest > this.arrival.source) {
+        const source = this.sourceTime(now);
+        if (source !== null) this.deliveryAges=[...this.deliveryAges,Math.max(0,source-newest)].slice(-80);
+        this.arrival = {wall:now,source:newest};
+      }
     }
   }
   add(number, point) {
@@ -144,7 +149,7 @@ export class AnimationEngine {
     if (this.manualBufferMs !== null) return this.manualBufferMs;
     const cadence = percentile([...this.drivers.values()].flatMap(d=>d.intervals),0.95) || 250;
     const deliverySpan=percentile(this.deliveryIntervals,0.95)*this.speed;
-    return clamp(Math.max(2*cadence,deliverySpan+cadence)+percentile(this.jitter,0.95),this.options.minBufferMs,this.options.maxBufferMs);
+    return clamp(Math.max(2*cadence,deliverySpan+cadence+percentile(this.jitter,0.95),percentile(this.deliveryAges,0.95)+deliverySpan+cadence),this.options.minBufferMs,this.options.maxBufferMs);
   }
   setBuffer(value) {
     const next=value === null || !Number.isFinite(Number(value)) ? null : clamp(Number(value),0,5000);
@@ -194,7 +199,21 @@ export class AnimationEngine {
     this.frameAt=now;
     const result=new Map();
     for(const [number,driver] of this.drivers){
-      const output=this.evaluate(driver,this.cursor,source);
+      let output=this.evaluate(driver,this.cursor,source);
+      // Once the cursor has passed the newest sample, a late batch may place
+      // the calculated position far ahead of the held marker. Hide while
+      // reacquiring: never render that accumulated displacement as one step.
+      if(output.underrun) {
+        const wasHidden=driver.recoveryHidden;
+        driver.needsRecovery=true; driver.recoveryAt=null;
+        if(wasHidden) output={state:'recovering',point:null,underrun:true};
+      }
+      else if(driver.needsRecovery && output.state==='interpolating') {
+        if(driver.recoveryAt===null || driver.recoveryAt===undefined) driver.recoveryAt=now;
+        driver.recoveryHidden=true;
+        if(now-driver.recoveryAt<150) output={state:'recovering',point:null};
+        else { driver.needsRecovery=false; driver.recoveryAt=null; driver.recoveryHidden=false; }
+      } else if(driver.needsRecovery) driver.recoveryAt=null;
       if(output.underrun && driver.state!=='waiting'){driver.underruns++;this.underruns++;}
       if(output.underrun){if(driver.waitingSince===undefined)driver.waitingSince=now;}
       else delete driver.waitingSince;
@@ -203,7 +222,7 @@ export class AnimationEngine {
     }
     this.lastFrame=result;
     const active=[...this.drivers.values()].filter(d=>d.samples.length>=2);
-    const waiting=active.filter(d=>d.waitingSince!==undefined && now-d.waitingSince>300);
+    const waiting=active.filter(d=>d.waitingSince!==undefined && now-d.waitingSince>50);
     if(this.running && this.manualBufferMs===null && active.length && waiting.length>active.length/2 && now-this.lastRebufferAt>5000){
       this.rebuffer(now);return this.lastFrame;
     }
@@ -232,14 +251,15 @@ export class AnimationEngine {
       this.trace.push({wallMs:now,sourceMs:source,cursorMs:this.cursor,driver:number,requestedRate:this.speed,
         presentationRate:rate,clockRate:this.clock.rate,serverRate:this.serverRate,phaseErrorMs:this.phaseError,
         lockedBufferMs:this.targetDelay,recommendedBufferMs:this.bufferMs(),effectiveDelayMs:source-this.cursor,
+        deliveryAgeP95Ms:percentile(this.deliveryAges,0.95),
         sourceIntervalMs:output.sourceIntervalMs??null,sourceSegmentSpeed:output.sourceSpeed??null,
-        sourcePathSpeed:dc>0 ? distance/dc*1000 : 0,
+        sourcePathSpeed:dc>0 && previous.state==='interpolating' && output.state==='interpolating' ? distance/dc*1000 : null,
         renderedPathSpeed:distance/dt*1000/this.speed,
         renderedChordSpeed:Math.hypot(output.point.x-previous.point.x,output.point.y-previous.point.y)/dt*1000/this.speed,
         repeated:output.repeated??false,state:output.state});
       if(this.trace.length>3600)this.trace.shift();
     }
-    this.previousMeasurement={wallMs:now,cursorMs:this.cursor,driver:number,point:output.point};
+    this.previousMeasurement={wallMs:now,cursorMs:this.cursor,driver:number,point:output.point,state:output.state};
   }
   traceCsv() {
     if(!this.trace.length)return '';
@@ -263,7 +283,7 @@ export class AnimationEngine {
       recommendedMs:this.bufferMs(),presentationRate:this.presentationRate,clockRate:this.clock?.rate,
       serverRate:this.serverRate,phaseErrorMs:this.phaseError,correctionPpm:this.correction*1e6,rebuffers:this.rebuffers,
       trace:this.trace.slice(-600),automatic:this.manualBufferMs===null,underruns:this.underruns,
-      deliveryHz:this.deliveryIntervals.length ? 1000/percentile(this.deliveryIntervals,0.5) : null,
+      deliveryAgeMs:percentile(this.deliveryAges,0.95),deliveryHz:this.deliveryIntervals.length ? 1000/percentile(this.deliveryIntervals,0.5) : null,
       drivers:[...this.drivers].map(([number,d])=>({number,state:d.state,buffered:d.samples.length,rejected:d.rejected+(d.sourceRejected??0),
         frequencyHz:d.intervals.length ? 1000/percentile(d.intervals,0.5):null,underruns:d.underruns}))};
   }

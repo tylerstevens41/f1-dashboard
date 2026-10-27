@@ -39,14 +39,14 @@ export default function AnimationDiagnostics({ animation }) {
     {stats && <>
       <p>Playback: {number(stats.sourceTime)} · Presentation: {number(stats.interpolationTime)} · {stats.running?'running':'paused'} {stats.speed}×</p>
       <p>Actual presentation rate: {number(stats.presentationRate)} · clock rate: {number(stats.clockRate)} · backend rate: {number(stats.serverRate)} · phase error: {number(stats.phaseErrorMs)} ms · correction: {stats.correctionPpm} ppm</p>
-      <p>Position delivery: {stats.deliveryHz?.toFixed(1)??'—'} Hz · locked buffer: {stats.bufferMs.toFixed(0)} ms · recommended: {stats.recommendedMs.toFixed(0)} ms · effective delay: {number(stats.effectiveDelayMs)} ms · rebuffers: {stats.rebuffers} · underruns: {stats.underruns}</p>
+      <p>Position delivery: {stats.deliveryHz?.toFixed(1)??'—'} Hz · GPS delivery age p95: {stats.deliveryAgeMs.toFixed(0)} ms · locked buffer: {stats.bufferMs.toFixed(0)} ms · recommended: {stats.recommendedMs.toFixed(0)} ms · effective delay: {number(stats.effectiveDelayMs)} ms · rebuffers: {stats.rebuffers} · underruns: {stats.underruns}</p>
       <label>Trace driver <select aria-label="Trace driver" onChange={e=>animation.inspect(e.target.value)} defaultValue=""><option value="">First available</option>{stats.drivers.map(d=><option key={d.number} value={d.number}>{d.number}</option>)}</select></label>
       <button onClick={()=>exportTrace(animation)}>Export bounded CSV trace</button>
       <Plot rows={stats.trace} title="Timeline rate / selected playback speed" fields={[["presentationRate","#48dfff"],["clockRate","#ffbd48"]]} normalize/>
       <Plot rows={stats.trace} title="Source-implied and rendered speed (native units/source second)" fields={[["sourcePathSpeed","#48df99"],["renderedPathSpeed","#48dfff"],["renderedChordSpeed","#ffbd48"]]}/>
       <table><thead><tr>{['Driver','Hz','Buffered','Motion','Rejected','Underruns'].map(h=><th key={h}>{h}</th>)}</tr></thead>
         <tbody>{stats.drivers.map(d=><tr key={d.number}><td>{d.number}</td><td>{d.frequencyHz?.toFixed(1)??'—'}</td><td>{d.buffered}</td><td>{d.state}</td><td>{d.rejected}</td><td>{d.underruns}</td></tr>)}</tbody></table>
-      <p>Trace records while this panel is open (up to 3,600 frames). Speeds come from GPS chords and timestamps, not validated vehicle telemetry. CSV includes source intervals/repeated coordinates, phase error, rates and buffer measurements. Flat clock rates with pulsing source speeds implicate source sampling; chord/path differences at corners identify polyline effects.</p>
+      <p>Trace records while this panel is open (up to 3,600 frames). Speeds come from GPS chords and timestamps, not validated vehicle telemetry. CSV includes source intervals/repeated coordinates, phase error, rates and buffer measurements. Waiting means the presentation cursor has reached the newest sample. Recovering hides a marker while late GPS is reacquired; larger measured delivery age may increase the automatic recommendation. Flat clock rates with pulsing source speeds implicate source sampling; chord/path differences at corners identify polyline effects.</p>
     </>}
   </details>;
 }

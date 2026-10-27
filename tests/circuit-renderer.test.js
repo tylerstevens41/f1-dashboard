@@ -30,3 +30,20 @@ test('shared renderer supports replay markers, calibrated features and flags', a
     assert.match(overlay,/#ff8040/);
   } finally { await server.close(); }
 });
+
+test('verified unequal sectors render along calibrated path; provisional colours require preview', async () => {
+ const server=await createServer({server:{middlewareMode:true},appType:'custom'});
+ try {
+  const {default:Renderer}=await server.ssrLoadModule('/src/circuits/CircuitRenderer.jsx');
+  const {emptyAnnotations}=await server.ssrLoadModule('/src/circuits/annotations.js');
+  const geometry=createGeometry([{x:0,y:0},{x:100,y:0},{x:100,y:100},{x:0,y:100},{x:0,y:0}]);
+  const config={...emptyAnnotations(austin,geometry),startFinish:{at:.8,status:'provisional'},sector1End:{at:.05,status:'provisional'},sector2End:{at:.5,status:'provisional'},corners:[{number:7,at:.1,offset:{x:90,y:-40},status:'provisional'}]};
+  const props={geometry,circuit:austin,annotations:config,flag:'RED'};
+  const missing=renderToStaticMarkup(createElement(Renderer,props));
+  assert.doesNotMatch(missing,/data-sector=/);assert.doesNotMatch(missing,/T7/);assert.match(missing,/data-layer="race-control"/);
+  const preview=renderToStaticMarkup(createElement(Renderer,{...props,previewProvisional:true}));
+  assert.equal((preview.match(/data-sector=/g)||[]).length,4);assert.match(preview,/#ed3897/);assert.match(preview,/#f6ce42/);assert.match(preview,/#40bff2/);assert.match(preview,/T7/);
+  const verified={...config,startFinish:{...config.startFinish,status:'verified'},sector1End:{...config.sector1End,status:'verified'},sector2End:{...config.sector2End,status:'verified'}};
+  const production=renderToStaticMarkup(createElement(Renderer,{...props,annotations:verified}));assert.equal((production.match(/data-sector=/g)||[]).length,4);
+ } finally {await server.close();}
+});

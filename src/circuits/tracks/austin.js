@@ -2,6 +2,7 @@
 // Do not populate official features until their positions have been calibrated.
 const austin = {
   id: "austin", layoutVersion: "austin-livef1-v1", calibrationFile: "/circuits/austin-calibration.json", calibrationStatus: "missing", name: "Circuit of the Americas", geometryVersion: 1,
+  annotationFile: "/circuits/austin-annotations.json",
   decorativeSvg: "/circuits/austin.svg", // Not GPS-calibrated; intentionally unused.
   sources: {
     livef1: { sessionName: "Austin", referenceFile: "/circuits/austin-gps-reference.json", matrix: [1, 0, 0, 1, 0, 0] },

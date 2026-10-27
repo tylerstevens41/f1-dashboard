@@ -7,3 +7,7 @@
 .live-circuit-viewport { flex:1;min-height:160px;min-width:0;padding:8px;overflow:hidden; }
 .live-circuit-bottom { padding:8px;font-size:9px;color:#aab2c0;flex:0 0 auto; }
 .calibration-error { color:#ffbf47;font-size:10px;padding:4px 10px; }
+.circuit-dev-panel {flex:0 0 auto;max-height:180px;overflow:auto;padding:6px 10px;font-size:10px;background:#161d27;color:#e4e8ef;}
+.circuit-dev-panel summary {cursor:pointer;}
+.circuit-dev-panel input[type=number] {width:65px;}
+.circuit-dev-panel p {margin:5px 0;}

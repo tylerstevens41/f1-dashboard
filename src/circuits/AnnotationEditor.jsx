@@ -1,0 +1,28 @@
+import { useState } from 'react';
+import { emptyAnnotations, validateAnnotations } from './annotations';
+
+export default function AnnotationEditor({circuit,geometry,value,onChange,placing,setPlacing}){
+  const [kind,setKind]=useState('startFinish');
+  const [turn,setTurn]=useState(1);
+  const [error,setError]=useState('');
+  const selected=kind==='corner'?value.corners.find(c=>c.number===turn):value[kind];
+  const update=patch=>{
+    if(!selected)return;
+    if(kind==='corner')onChange({...value,corners:value.corners.map(c=>c.number===turn?{...c,...patch}:c)});
+    else onChange({...value,[kind]:{...selected,...patch}});
+  };
+  const exportJson=()=>{try{validateAnnotations(value,circuit,geometry);const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download=`${circuit.id}-annotations.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);setError('');}catch(e){setError(e.message);}};
+  return <details className="circuit-dev-panel" onToggle={e=>{if(!e.currentTarget.open)setPlacing(null);}}><summary>Annotation editor (development)</summary>
+    <p>Positions are path fractions on this exact calibration. All clicks are provisional. Confirm direction, finish and sector positions against an event map before marking verified.</p>
+    <label>Type <select value={kind} onChange={e=>{setKind(e.target.value);setPlacing(null);}}><option value="startFinish">Start / finish</option><option value="sector1End">Sector 1 end</option><option value="sector2End">Sector 2 end</option><option value="corner">Corner</option></select></label>{' '}
+    {kind==='corner' && <label>Turn <input type="number" min="1" max="99" value={turn} onChange={e=>setTurn(Number(e.target.value))}/></label>}{' '}
+    <button onClick={()=>setPlacing(placing?null:{kind,number:turn})}>{placing?'Cancel placement':'Click track to place / move'}</button>{' '}
+    <label>Driving direction <select value={value.direction} onChange={e=>{const provisional=x=>x?{...x,status:'provisional'}:null;onChange({...value,direction:Number(e.target.value),startFinish:provisional(value.startFinish),sector1End:provisional(value.sector1End),sector2End:provisional(value.sector2End)});}}><option value="1">Along geometry</option><option value="-1">Opposite geometry</option></select></label>
+    <p>Selected: {selected ? `${selected.at.toFixed(5)} · ${(selected.at*geometry.total).toFixed(1)} native path units · ${selected.status}` : 'not placed'} · geometry {value.geometryId}</p>
+    {selected && <><label>Offset X <input type="number" value={selected.offset?.x??0} onChange={e=>update({offset:{...selected.offset,x:Number(e.target.value)}})}/></label><label> Offset Y <input type="number" value={selected.offset?.y??-245} onChange={e=>update({offset:{...selected.offset,y:Number(e.target.value)}})}/></label>{' '}
+    <button onClick={()=>kind==='corner'?onChange({...value,corners:value.corners.filter(c=>c.number!==turn)}):onChange({...value,[kind]:null})}>Delete</button></>}
+    <p>Provenance: <input value={value.provenance} onChange={e=>onChange({...value,provenance:e.target.value})} placeholder="Evidence / local verification"/> <button disabled={!selected||!value.provenance.trim()} onClick={()=>update({status:selected.status==='verified'?'provisional':'verified'})}>Toggle verified</button></p>
+    {circuit.id==='austin' && <p>2026 FIA map: S1 1.914 km, S2 1.941 km, S3 1.658 km; S1 is 65 m before T7, S2 65 m before T13. <button disabled={!value.startFinish} onClick={()=>{const s=value.startFinish.at,d=value.direction,wrap=x=>(x%1+1)%1;onChange({...value,sector1End:{at:wrap(s+d*1.914/5.513),status:'provisional'},sector2End:{at:wrap(s+d*3.855/5.513),status:'provisional'}});}}>Estimate from FIA distances</button></p>}
+    <button onClick={exportJson}>Export JSON</button>{' '}<button onClick={()=>onChange(emptyAnnotations(circuit,geometry))}>Clear annotations</button> {error && <span role="alert">{error}</span>}
+  </details>;
+}

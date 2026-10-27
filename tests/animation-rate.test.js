@@ -68,7 +68,7 @@ test('trace distinguishes GPS quantization and corner chord effects from clock-r
 });
 
 test('Austin trace regression: late 280 ms GPS segment after a 194 ms hold never draws the accumulated jump',()=>{
-  const e=new AnimationEngine();e.ingest(packet('snapshot',2000,1,{topics:{}}),0);e.setBuffer(1000);e.setTracing(true);
+  const e=new AnimationEngine();e.ingest(packet('snapshot',1900,1,{topics:{}}),0);e.setBuffer(1000);e.setTracing(true);
   e.add('1',{time:700,x:0,y:0});e.add('1',{time:1000,x:209.1,y:0});
   e.frame(0);e.frame(6);e.frame(194);
   assert.equal(e.lastFrame.get('1').state,'waiting');
@@ -91,7 +91,7 @@ test('automatic recommendation accounts for actual GPS delivery age and manual r
 });
 
 test('repeated underrun during reacquisition stays hidden until interpolation is stable',()=>{
-  const e=new AnimationEngine();e.ingest(packet('snapshot',2000,1,{topics:{}}),0);e.setBuffer(1000);
+  const e=new AnimationEngine();e.ingest(packet('snapshot',1900,1,{topics:{}}),0);e.setBuffer(1000);
   e.add('1',{time:700,x:0,y:0});e.add('1',{time:1000,x:100,y:0});e.frame(0);e.frame(100);
   e.add('1',{time:1150,x:150,y:0});assert.equal(e.frame(110).get('1').state,'recovering');
   assert.equal(e.frame(160).get('1').point,null);assert.equal(e.frame(170).get('1').point,null);

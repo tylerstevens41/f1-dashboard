@@ -15,7 +15,11 @@ export class AnimationEngine {
     this.tracing = false;
     this.reset();
   }
-  reset(generation = null) {
+  reset(generation = null, reason = 'initial') {
+    // Existing mounted markers must not retain a position from the prior session.
+    for (const callback of this.listeners.values()) callback({state:'recovering',point:null});
+    this.resetReason = reason;
+    this.rebufferReason = null;
     this.generation = generation;
     this.sequence = -1;
     this.drivers = new Map();
@@ -89,7 +93,8 @@ export class AnimationEngine {
     if (message?.version !== 1 || !['snapshot','topic','status','clock'].includes(message.type)) return;
     if (message.type !== 'snapshot' && this.generation !== null &&
       (message.generation < this.generation || (message.generation === this.generation && message.sequence <= this.sequence))) return;
-    if (message.type === 'snapshot' || message.generation !== this.generation) this.reset(message.generation);
+    if (message.type === 'snapshot' || message.generation !== this.generation)
+      this.reset(message.generation, message.type === 'snapshot' ? 'snapshot' : 'generation-change');
     this.sequence = message.sequence;
     // Topic clockMs is an event timestamp, not the playback transport clock.
     if (message.type !== 'topic') this.sync(message,now);
@@ -157,7 +162,8 @@ export class AnimationEngine {
     this.manualBufferMs=next;
   }
   inspect(number) { this.traceDriver=number===null || number==='' ? null : String(number);this.trace=[];this.previousMeasurement=null; }
-  rebuffer(now) {
+  rebuffer(now, reason) {
+    this.rebufferReason=reason;
     this.cursor=null;this.frameAt=now;this.previousMeasurement=null;this.pendingRebuffer=false;
     this.lastRebufferAt=now;this.rebuffers++;
     for(const callback of this.listeners.values())callback({state:'recovering',point:null});
@@ -186,11 +192,17 @@ export class AnimationEngine {
     const source=this.sourceTime(now);
     if (source === null) return this.lastFrame;
     const rawElapsed=this.frameAt === null ? 0 : now-this.frameAt;
-    if((rawElapsed>1000 && this.running) || this.pendingRebuffer){this.rebuffer(now);return this.lastFrame;}
+    if((rawElapsed>1000 && this.running) || this.pendingRebuffer){
+      this.rebuffer(now, this.pendingRebuffer ? 'buffer-change' : 'animation-frame-gap');return this.lastFrame;
+    }
     const elapsed=Math.max(0,rawElapsed);
     if(this.cursor===null){
-      if(![...this.drivers.values()].some(d=>d.samples.length>=2)){this.frameAt=now;return this.lastFrame;}
-      this.targetDelay=this.bufferMs();this.cursor=source-this.targetDelay;
+      const delay=this.bufferMs(), candidate=source-delay;
+      // Two samples alone do not prove that the delayed cursor is bracketed.
+      // Wait for real, fresh samples surrounding it before showing any car.
+      const ready=[...this.drivers.values()].some(d=>this.evaluate(d,candidate,source).state==='interpolating');
+      if(!ready){this.frameAt=now;return this.lastFrame;}
+      this.targetDelay=delay;this.cursor=candidate;
     }else if(this.running){
       // Locked delay, stable velocity. Do not chase per-packet buffer estimates.
       this.presentationRate=this.speed*(1+this.correction);
@@ -207,6 +219,7 @@ export class AnimationEngine {
         const wasHidden=driver.recoveryHidden;
         driver.needsRecovery=true; driver.recoveryAt=null;
         if(wasHidden) output={state:'recovering',point:null,underrun:true};
+        else if(!driver.hasDisplayed) output={...output,point:null};
       }
       else if(driver.needsRecovery && output.state==='interpolating') {
         if(driver.recoveryAt===null || driver.recoveryAt===undefined) driver.recoveryAt=now;
@@ -217,6 +230,7 @@ export class AnimationEngine {
       if(output.underrun && driver.state!=='waiting'){driver.underruns++;this.underruns++;}
       if(output.underrun){if(driver.waitingSince===undefined)driver.waitingSince=now;}
       else delete driver.waitingSince;
+      if(output.point && output.state==='interpolating') driver.hasDisplayed=true;
       driver.state=output.state;result.set(number,output);
       this.listeners.get(number)?.(output);
     }
@@ -224,7 +238,7 @@ export class AnimationEngine {
     const active=[...this.drivers.values()].filter(d=>d.samples.length>=2);
     const waiting=active.filter(d=>d.waitingSince!==undefined && now-d.waitingSince>50);
     if(this.running && this.manualBufferMs===null && active.length && waiting.length>active.length/2 && now-this.lastRebufferAt>5000){
-      this.rebuffer(now);return this.lastFrame;
+      this.rebuffer(now, 'widespread-underrun');return this.lastFrame;
     }
     this.measure(now,source,result);
     return result;
@@ -279,6 +293,8 @@ export class AnimationEngine {
   }
   diagnostics(now) {
     return {mode:this.mode,running:this.running,speed:this.speed,sourceTime:this.sourceTime(now),interpolationTime:this.cursor,
+      phase:this.cursor===null?'priming':'active',resetReason:this.resetReason,rebufferReason:this.rebufferReason,
+      lastGpsArrivalMs:this.arrival ? Math.max(0,now-this.arrival.wall) : null,
       bufferMs:this.targetDelay,effectiveDelayMs:this.cursor===null?null:this.sourceTime(now)-this.cursor,
       recommendedMs:this.bufferMs(),presentationRate:this.presentationRate,clockRate:this.clock?.rate,
       serverRate:this.serverRate,phaseErrorMs:this.phaseError,correctionPpm:this.correction*1e6,rebuffers:this.rebuffers,

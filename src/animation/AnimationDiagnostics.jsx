@@ -37,6 +37,7 @@ export default function AnimationDiagnostics({ animation }) {
     <label><input type="checkbox" checked={manual} onChange={e=>{setManual(e.target.checked);animation.setBuffer(e.target.checked?buffer:null);}}/>Manual buffer (source milliseconds; changing it explicitly re-primes)</label>
     <input aria-label="Interpolation buffer" type="range" min="0" max="5000" step="25" value={buffer} disabled={!manual} onChange={e=>{setBuffer(Number(e.target.value));animation.setBuffer(Number(e.target.value));}}/>
     {stats && <>
+      <p>Animation: {stats.phase} · last reset: {stats.resetReason} · last rebuffer: {stats.rebufferReason??'none'} · last new GPS arrival: {stats.lastGpsArrivalMs===null?'none':`${stats.lastGpsArrivalMs.toFixed(0)} ms ago`}</p>
       <p>Playback: {number(stats.sourceTime)} · Presentation: {number(stats.interpolationTime)} · {stats.running?'running':'paused'} {stats.speed}×</p>
       <p>Actual presentation rate: {number(stats.presentationRate)} · clock rate: {number(stats.clockRate)} · backend rate: {number(stats.serverRate)} · phase error: {number(stats.phaseErrorMs)} ms · correction: {stats.correctionPpm} ppm</p>
       <p>Position delivery: {stats.deliveryHz?.toFixed(1)??'—'} Hz · GPS delivery age p95: {stats.deliveryAgeMs.toFixed(0)} ms · locked buffer: {stats.bufferMs.toFixed(0)} ms · recommended: {stats.recommendedMs.toFixed(0)} ms · effective delay: {number(stats.effectiveDelayMs)} ms · rebuffers: {stats.rebuffers} · underruns: {stats.underruns}</p>

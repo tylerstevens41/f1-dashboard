@@ -143,3 +143,61 @@ test('background suspension hides before reacquiring; never runs a catch-up shor
   e.subscribe('1',value=>{output=value;});e.frame(0);e.frame(16);e.frame(2000);
   assert.equal(output.state,'recovering');assert.equal(output.point,null);assert.equal(e.cursor,null);
 });
+
+test('startup waits for fresh samples bracketing the delayed cursor in TEST and LIVE',()=>{
+  for(const mode of ['TEST','LIVE']){
+    const e=new AnimationEngine();e.ingest(envelope('snapshot',2000,1,{mode,topics:{}}),0);e.setBuffer(500);
+    e.add('1',{time:1000,x:100,y:1});e.add('1',{time:1200,x:120,y:1});
+    let output;e.subscribe('1',value=>{output=value;});e.frame(0);
+    assert.equal(e.cursor,null);assert.equal(output.point,null);assert.equal(e.diagnostics(0).phase,'priming');
+    e.add('1',{time:1700,x:170,y:1});e.frame(10);
+    assert.equal(e.diagnostics(10).phase,'active');assert.equal(output.state,'interpolating');
+  }
+});
+
+test('simultaneous outage hides all drivers and automatically recovers after fresh samples',()=>{
+  const e=new AnimationEngine();e.ingest(envelope('snapshot',2000,1,{topics:{}}),0);e.setBuffer(500);
+  const visible=new Map();
+  for(let n=1;n<=3;n++){
+    e.add(n,{time:1200,x:120,y:n});e.add(n,{time:1700,x:170,y:n});
+    e.subscribe(n,value=>visible.set(n,value));
+  }
+  e.frame(0);assert.ok([...visible.values()].every(x=>x.state==='interpolating'));
+  e.frame(210);assert.ok([...visible.values()].every(x=>x.state==='waiting'));
+  e.frame(1000);e.frame(2000);e.frame(2600);
+  assert.ok([...visible.values()].every(x=>x.state==='stale' && x.point===null));
+  for(let n=1;n<=3;n++){
+    e.add(n,{time:4000,x:400,y:n});e.add(n,{time:4600,x:460,y:n});e.add(n,{time:5000,x:500,y:n});
+  }
+  e.frame(2610);e.frame(2770);
+  assert.ok([...visible.values()].every(x=>x.state==='interpolating' && x.point));
+});
+
+test('same-generation reconnect snapshots immediately hide obsolete markers and re-prime',()=>{
+  const e=new AnimationEngine();seed(e);let output;e.subscribe('1',value=>{output=value;});e.frame(0);
+  assert.equal(output.state,'interpolating');
+  e.ingest(envelope('snapshot',1100,2,{topics:{}}),100);
+  assert.equal(output.point,null);assert.equal(e.cursor,null);assert.equal(e.drivers.size,0);
+  assert.equal(e.diagnostics(100).resetReason,'snapshot');
+  e.add('1',{time:500,x:50,y:1});e.add('1',{time:1000,x:100,y:1});e.frame(100);
+  assert.equal(output.state,'interpolating');
+});
+
+test('widespread startup underrun re-primes until fresh brackets arrive',()=>{
+  const e=new AnimationEngine();e.ingest(envelope('snapshot',2000,1,{topics:{}}),0);
+  for(let n=1;n<=3;n++) {e.add(n,{time:1300,x:130,y:n});e.add(n,{time:1600,x:160,y:n});}
+  e.frame(0);e.frame(250);e.frame(320);
+  assert.equal(e.cursor,null);assert.equal(e.diagnostics(320).rebufferReason,'widespread-underrun');
+  e.frame(330);assert.equal(e.cursor,null);
+  for(let n=1;n<=3;n++)for(const time of [1900,2200,2400])e.add(n,{time,x:time/10,y:n});
+  e.frame(340);assert.notEqual(e.cursor,null);
+});
+
+test('a driver with no bracket stays hidden even when another driver has started',()=>{
+  const e=new AnimationEngine();e.ingest(envelope('snapshot',2000,1,{topics:{}}),0);e.setBuffer(500);
+  e.add('1',{time:1300,x:130,y:1});e.add('1',{time:1700,x:170,y:1});
+  e.add('2',{time:1000,x:100,y:2});e.add('2',{time:1200,x:120,y:2});
+  const result=e.frame(0);
+  assert.equal(result.get('1').state,'interpolating');
+  assert.equal(result.get('2').state,'waiting');assert.equal(result.get('2').point,null);
+});

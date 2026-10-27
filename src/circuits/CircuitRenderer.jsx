@@ -8,7 +8,7 @@ function Segment({ geometry, start, end, color }) {
 
 export default function CircuitRenderer({ geometry, circuit, drivers = [], selectedDriver, onSelectDriver,
   showLabels = true, showReference = false, animate = false, flag, annotations = circuit.annotations,
-  annotationsCalibrated = true, svgRef, onClick, children, style, variant = "live", clockRef, motionOptions, showTrack = true }) {
+  annotationsCalibrated = true, svgRef, onClick, children, style, variant = "live", animation, showTrack = true }) {
   if (!geometry) return null;
   const color = circuit.flagColors[flag] ?? "#e7eaf0";
   const features = annotationsCalibrated ? annotations : {};
@@ -32,7 +32,7 @@ export default function CircuitRenderer({ geometry, circuit, drivers = [], selec
     {drivers.map(driver => {
       const number = String(driver.driver_number ?? driver.number);
       const selected = number === String(selectedDriver);
-      if (animate && clockRef) return <BufferedDriverMarker key={number} driver={driver} selected={selected} showLabel={showLabels} onSelect={() => onSelectDriver?.(number)} project={geometry.project} clockRef={clockRef} options={motionOptions} />;
+      if (animate && animation) return <BufferedDriverMarker key={number} driver={driver} selected={selected} showLabel={showLabels} onSelect={() => onSelectDriver?.(number)} project={geometry.project} animation={animation} />;
       const radius = variant === "replay" ? 350 : 260;
       return <g key={number} transform={`translate(${driver.x} ${driver.y})`} onClick={event => { if (onSelectDriver) { event.stopPropagation(); onSelectDriver(number); } }} style={{ cursor: "pointer" }}>
         {selected && <circle r="610" fill={driver.color} opacity="0.2" />}

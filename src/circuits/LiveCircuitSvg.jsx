@@ -53,7 +53,12 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
           const cr=await fetch(circuit.cornerFile,{signal:controller.signal,cache:'no-store'});
           if(cr.ok && cr.headers.get('content-type')?.includes('json')) cornerFile=await cr.json();
         } catch(err) {if(err.name==='AbortError')throw err;warning='Imported corner file is invalid or unavailable.';}
-        if(!controller.signal.aborted){setLoaded({legacy:legacy.points,calibration,annotationFile,cornerFile});setError(warning);}
+        let sectorFile=null;
+        try {
+          const sr=await fetch(circuit.sectorFile,{signal:controller.signal,cache:'no-store'});
+          if(sr.ok && sr.headers.get('content-type')?.includes('json')) sectorFile=await sr.json();
+        }catch(err){if(err.name==='AbortError')throw err;warning='Calculated sector file is invalid or unavailable.';}
+        if(!controller.signal.aborted){setLoaded({legacy:legacy.points,calibration,annotationFile,cornerFile,sectorFile});setError(warning);}
       }catch(err){if(err.name!=='AbortError')setError(err.message);}
     }
     load();return()=>controller.abort();
@@ -64,6 +69,7 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
     const id=geometryId(geometry);
     let base=emptyAnnotations(circuit,geometry);
     try {if(loaded?.cornerFile)base=validateAnnotations(loaded.cornerFile,circuit,geometry);} catch(err) {base.loadError=err.message;}
+    try {if(loaded?.sectorFile){const sectors=validateAnnotations(loaded.sectorFile,circuit,geometry);base=mergeImportedCorners(sectors,{...base,startFinish:base.startFinish??sectors.startFinish,sector1End:base.sector1End??sectors.sector1End,sector2End:base.sector2End??sectors.sector2End,direction:sectors.direction});}} catch(err) {base.loadError=err.message;}
     try {if(loaded?.annotationFile)base=mergeImportedCorners(base,validateAnnotations(loaded.annotationFile,circuit,geometry));} catch(err) {base.loadError=err.message;}
     if(draft?.geometryId===id && draft?.circuitId===circuit.id && draft?.layoutVersion===circuit.layoutVersion)return mergeImportedCorners(base,draft);
     if(import.meta.env.DEV){try{const saved=JSON.parse(localStorage.getItem(`f1-annotations-${circuit.id}-${circuit.layoutVersion}-${id}`)||'null');if(saved)return mergeImportedCorners(base,validateAnnotations(saved,circuit,geometry));}catch{ /* incompatible drafts are never applied */ }}
@@ -113,6 +119,7 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
     {import.meta.env.DEV && geometry && annotations && <><AppearancePanel value={appearance} onChange={changeAppearance} preview={preview} setPreview={setPreview}/><AnnotationEditor circuit={circuit} geometry={geometry} value={annotations} onChange={changeAnnotations} placing={placing} setPlacing={setPlacing} onSelect={setSelection}/><button onClick={()=>setRevision(v=>v+1)}>Reload annotation files</button><div className="calibration-debug-panel">Annotations: {[annotations.startFinish,annotations.sector1End,annotations.sector2End].every(x=>x?.status==='verified')?'verified': 'unverified / incomplete'} · {annotations.corners.length} corners · FastF1 alignment: {annotations.alignment?.status??'not loaded'} · held-out RMS {annotations.alignment?.heldOutRms?.toFixed(1)??'—'}, p95 {annotations.alignment?.heldOutP95?.toFixed(1)??'—'} native units · {placing?'click track to place':''}</div></>}
     {import.meta.env.DEV && animation && <AnimationDiagnostics animation={animation}/>}
     {(placementError||annotations?.loadError) && <p role="alert" className="calibration-error">{placementError||annotations.loadError}</p>}
+    {import.meta.env.DEV && annotations?.boundaryDiagnostics && <div className="calibration-debug-panel">Source calculation: provisional · {annotations.boundaryDiagnostics.validLaps} laps / {annotations.boundaryDiagnostics.drivers} drivers · {Object.values(annotations.boundaryDiagnostics.rejected??{}).reduce((a,b)=>a+b,0)} rejected · {annotations.sectorSource?.year} {annotations.sectorSource?.event} {annotations.sectorSource?.session} · FIA: {annotations.boundaryDiagnostics.fia?.status}<br/>{['startFinish','sector1End','sector2End'].map(k=><span key={k}>{k}: {annotations[k]?.at.toFixed(5)??'overridden / hidden'} · p95 {annotations[k]?.sourceEstimate?.statistics?.p95NativeDistance?.toFixed(1)??'—'} native units · {annotations[k]?.sourceEstimate?.statistics?.accepted??'—'} kept / {annotations[k]?.sourceEstimate?.statistics?.outliers??'—'} outliers; </span>)}<br/>{annotations.boundaryDiagnostics.fia?.warnings?.join(' · ')}</div>}
     {error && <p role="alert" className="calibration-error">{error}</p>}
     <div className="live-circuit-viewport">
       {geometry?<CircuitRenderer geometry={geometry} circuit={circuit} drivers={layers.drivers?markers:[]}

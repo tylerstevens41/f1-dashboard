@@ -73,7 +73,7 @@ test('larger standalone corner circles retain offsets, fit suffixes and stay ins
   const geometry=createGeometry([{x:0,y:0},{x:100,y:0},{x:100,y:100},{x:0,y:100},{x:0,y:0}]);
   const annotations={corners:[{number:20,letter:'A',at:0,offset:{x:-600,y:-800}}]};
   const before=JSON.stringify(annotations);
-  const markup=renderToStaticMarkup(createElement(Renderer,{geometry,circuit:austin,annotations}));
+  const markup=renderToStaticMarkup(createElement(Renderer,{geometry,circuit:austin,annotations,appearance:{...defaultAppearance,cornerLabelSpacing:1}}));
   const group=markup.match(/<g data-layer="corner"[^>]*>(.*?)<\/g>/s)[1];
   assert.doesNotMatch(group,/<line\b/);assert.match(group,/20A/);
   const circle=group.match(/<circle cx="([^"]+)" cy="([^"]+)" r="([^"]+)"/);
@@ -84,5 +84,22 @@ test('larger standalone corner circles retain offsets, fit suffixes and stay ins
   assert.match(markup,/preserveAspectRatio="xMidYMid meet"/);
   const smaller=renderToStaticMarkup(createElement(Renderer,{geometry,circuit:austin,annotations,appearance:{...defaultAppearance,cornerLabelScale:1}}));
   assert.match(smaller,/r="155"/);assert.equal(JSON.stringify(annotations),before);
+  const spaced=renderToStaticMarkup(createElement(Renderer,{geometry,circuit:austin,annotations}));
+  assert.match(spaced,/<circle cx="-40" cy="-169.9999999999999"|<circle cx="-40" cy="-170"/);
+  assert.equal(JSON.stringify(annotations),before);
+ }finally{await server.close();}
+});
+
+test('calculated provisional boundaries render automatically with unequal colours and finish marker',async()=>{
+ const server=await createServer({server:{middlewareMode:true},appType:'custom'});
+ try {
+  const {default:Renderer}=await server.ssrLoadModule('/src/circuits/CircuitRenderer.jsx');
+  const {emptyAnnotations}=await server.ssrLoadModule('/src/circuits/annotations.js');
+  const geometry=createGeometry([{x:0,y:0},{x:100,y:0},{x:100,y:100},{x:0,y:100},{x:0,y:0}]);
+  const mark=at=>({at,status:'provisional',calculated:true});
+  const data={...emptyAnnotations(austin,geometry),startFinish:mark(.8),sector1End:mark(.05),sector2End:mark(.5)};
+  const html=renderToStaticMarkup(createElement(Renderer,{geometry,circuit:austin,annotations:data}));
+  assert.equal((html.match(/data-sector=/g)||[]).length,4);
+  assert.match(html,/data-layer="start-finish"/);assert.match(html,/#ed3897/);assert.match(html,/#f6ce42/);assert.match(html,/#40bff2/);
  }finally{await server.close();}
 });

@@ -48,3 +48,21 @@ test('corner letters are unique IDs; manual edits preserve imported defaults and
  assert.deepEqual(merged.importSource,base.importSource);
  assert.throws(()=>placeAnnotation(base,{kind:'startFinish'},NaN));
 });
+
+test('calculated boundaries load without replacing reviewed positions, corners, or manual overrides',async()=>{
+ const {mergeImportedCorners,placeAnnotation}=await import('../src/circuits/annotations.js');
+ const calculated=at=>({at,status:'provisional',calculated:true,sourceEstimate:{at,statistics:{p95LapFraction:.001}}});
+ const base={...emptyAnnotations(circuit,geometry),startFinish:calculated(.8),sector1End:calculated(.05),sector2End:calculated(.5),boundaryDiagnostics:{validLaps:7},direction:-1};
+ const existing={...emptyAnnotations(circuit,geometry),corners:[{number:1,at:.2,status:'provisional'}]};
+ const merged=mergeImportedCorners(base,existing);
+ assert.equal(merged.startFinish.at,.8);assert.equal(merged.corners.length,1);assert.equal(merged.direction,-1);
+ const reviewed=mergeImportedCorners(base,{startFinish:{at:.75,status:'verified'}});
+ assert.equal(reviewed.startFinish.at,.75);assert.equal(reviewed.startFinish.sourceEstimate.at,.8);
+ const chosen=mergeImportedCorners(reviewed,{startFinish:{...reviewed.startFinish,status:'provisional',manualOverride:false,preferCalculated:true,previousOverride:{at:.75}}});
+ assert.equal(chosen.startFinish.at,.8);assert.equal(chosen.startFinish.previousOverride.at,.75);
+ const adjusted=placeAnnotation(merged,{kind:'sector1End'},.07);
+ assert.equal(adjusted.sector1End.at,.07);assert.equal(adjusted.sector1End.sourceEstimate.at,.05);
+ assert.equal(mergeImportedCorners(base,adjusted).sector1End.at,.07);
+ const cleared=mergeImportedCorners(base,{sector1End:null,boundaryOverrides:{sector1End:true}});
+ assert.equal(cleared.sector1End,null);
+});

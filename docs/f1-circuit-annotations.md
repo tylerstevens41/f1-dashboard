@@ -118,3 +118,46 @@ try {
 ```
 
 Use this only with an account authorized to retrieve those archives. If authentication or the upstream feed remains unavailable, retain your current dashboard and report the importer error type; do not share credentials or token caches. The script never substitutes invented data.
+
+## Timing/GPS start-finish and sector calculation
+
+Run `bridge.sector_import` in `.venv-fastf1` to generate **all three** boundaries together. It reuses the corner importer's FastF1 cache, full-lap registration, geometry fingerprint, and ambiguity gates. It never changes LiveF1 calibration or your corner JSON. The optional `bridge.corner_import --with-sectors` flag can also create corners and all boundaries in one new output; existing corner-only caches must be refreshed to include multi-lap timing/position records. Neither command silently substitutes another season.
+
+FastF1 3.9.0's `Telemetry` docstring and `Session._load_telemetry` source distinguish `SessionTime` (session elapsed time), `Date` (sample timestamp), and `Time` (can be slice-relative). Lap `LapStartTime` and lap-ending `Time` are session times. The collector uses the full original driver position stream, not merged car/position telemetry, and validates `Date - session.t0_date == SessionTime` and `LapStartDate - t0_date == LapStartTime` within 2 ms. This checks time-base consistency, not independent proof that feed clocks have zero systematic bias. Original `Source=pos` and `Status=OnTrack` samples are required.
+
+Each lap must be accurate, completed, non-pit, non-generated, non-deleted and green/yellow. Sector durations must sum to LapTime within 3 ms; end-start must agree within 50 ms. Crossings use start, start+S1, start+S1+S2, and measured lap end. Each position is linearly interpolated between surrounding original GPS timestamps, with a maximum 500 ms bracket. Whole-lap GPS gaps over 750 ms, missing dates, invalid coordinates and extreme spikes are rejected. Sector receipt SessionTimes are recorded as offset diagnostics, never used as physical crossing timestamps. The first 40 eligible laps are collected in lap-number/driver order, sampling multiple drivers when available.
+
+The shared registration transforms crossings into the existing LiveF1 native geometry, then the path projection checks distance and competing nearby branches. Start and end estimates must agree within 0.5% of a lap; they form one circular estimate per lap. At least five distinct valid laps are required. Circular medoid/unwrapping, median and MAD-based rejection prevent estimates across path fraction 1/0 from averaging toward 0.5. P95 residual spread over 0.5% of a lap causes failure. Results retain fractions, accepted/outlier counts, native-distance spread, driver count, rejected-lap reasons, per-lap start/end estimates, GPS bracket durations, projection errors, registration RMS/p95, season and session.
+
+The aggregate must follow the registered driving direction with three nontrivial unequal segments. Austin 2026 receives coarse checks against the FIA lengths, S1 before T7, S2 before T13, and the finish lying between T20/T1. Comparing geometry ratios scaled to 5513 m is only a screening check: GPS racing-line distances and FastF1's approximate corner markers are not surveyed FIA centreline distances. Differences over 10% for sector length or 100 m for the stated intermediate-to-corner distance raise discrepancy warnings; they do not alter estimates or establish verification. The calculated lap control/finish line may differ from the physical grid start line. All outputs remain **provisional**, even if coarse map checks pass. Tight visual/map checks and representative authenticated trajectories are still required.
+
+### Windows: calculate Austin without replacing corners or reviewed edits
+
+```powershell
+git switch feat/f1-circuit-annotations
+git pull --ff-only origin feat/f1-circuit-annotations
+.\.venv-fastf1\Scripts\Activate.ps1
+.\.venv-fastf1\Scripts\python.exe -m pip install -r bridge/requirements-corners.txt
+.\.venv-fastf1\Scripts\python.exe -m bridge.sector_import --year 2026 --event "United States" --session R --source-output data-cache/austin-fastf1-boundaries-2026.json
+.\.venv-fastf1\Scripts\python.exe -m bridge.sector_import --source-input data-cache/austin-fastf1-boundaries-2026.json --calibration public/circuits/austin-calibration.json --output public/circuits/austin-sectors.json
+```
+
+If a suitable multi-lap source JSON already exists, skip the fetch command. FastF1 will reuse its raw cache when fetching the session. Use the backend-only authentication workflow above if needed, changing the module to `bridge.sector_import` and the source-output filename. Never share credentials or token caches. Both source and output writers refuse existing paths: choose a new filename for a repeat calculation, review it, and explicitly replace the sector file only if wanted. Do not delete the calibration, corners, or manual annotation file.
+
+Start the existing bridge in a separate terminal:
+
+```powershell
+.\.venv\Scripts\python.exe -m bridge.server --login --idle --allow-test
+```
+
+Start the frontend in another terminal:
+
+```powershell
+npm run dev
+```
+
+Load the same Austin TEST race around offset 5600. The dashboard loads `austin-sectors.json` automatically; use **Reload annotation files** if already open. Calculated provisional boundaries display automatically as magenta/yellow/cyan segments plus the perpendicular finish marker. Existing non-null manual/reviewed boundary positions take precedence; they are not overwritten. Diagnostics and the editor show the original calculated fraction, spread and any override. To use a calculated position instead of an existing reviewed position, export/back up the reviewed annotations and click **Use calculated position (replace this override)** for that selected boundary. This explicit action preserves the prior position in `previousOverride`; it does not erase your whole file. Manual changes preserve `sourceEstimate` and set `manualOverride`; explicit deletion is also preserved. The finish origin is independent of the arbitrary first geometry point. No boundary ever defaults to an equal third.
+
+The 1.65× corner label size is unchanged. **Corner label spacing** defaults to 1.15× and multiplies each existing offset vector only at render time, including manually adjusted vectors; it never rewrites stored offsets or anchors. Viewport padding accounts for the larger spacing; connector lines remain absent.
+
+Validate start/finish against the map's timing control line; confirm direction and S1 approximately 65 m before T7 / S2 approximately 65 m before T13. Inspect the source-calculation panel, per-boundary spread, original versus manual fractions, rejected reasons and FIA discrepancy warnings in the exported diagnostics. A numerically coherent result can still have systematic telemetry timing bias; do not mark it verified solely because it renders cleanly. No real Austin boundary calculation has been verified by the implementer without the local authenticated source and calibration.

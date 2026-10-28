@@ -15,13 +15,15 @@ export default function CircuitRenderer({ geometry, circuit, drivers = [], selec
   const features = annotationsCalibrated ? annotations : {};
   const modern=features?.schema==='f1-circuit-annotations-v1';
   const verified=modern && [features.startFinish,features.sector1End,features.sector2End].every(x=>x?.status==='verified');
-  const sectors=modern && (verified||previewProvisional) ? sectorRanges(features) : null;
-  const showFeature=f=>f && (!modern || f.status==='verified' || previewProvisional);
+  const calculated=modern && [features.startFinish,features.sector1End,features.sector2End].every(x=>x?.calculated);
+  const sectors=modern && (verified||calculated||previewProvisional) ? sectorRanges(features) : null;
+  const showFeature=f=>f && (!modern || f.status==='verified' || f.calculated || previewProvisional);
   const scale=Math.max(1,Math.min(2,Number(appearance.cornerLabelScale)||defaultAppearance.cornerLabelScale));
   const radius=155*scale;
+  const spacing=Math.max(0.8,Math.min(1.5,Number(appearance.cornerLabelSpacing)||defaultAppearance.cornerLabelSpacing));
   const cornerLabels=appearance.corners ? (features.corners??[]).filter(f=>!f.hidden && (showFeature(f)||f.imported)).map(f=>{
     const p=pointAt(geometry,f.at);
-    return {feature:f,x:p.x+(f.offset?.x??0),y:p.y+(f.offset?.y??-450)};
+    return {feature:f,x:p.x+(f.offset?.x??0)*spacing,y:p.y+(f.offset?.y??-450)*spacing};
   }) : [];
   // Expand only the viewport when needed; anchors, offsets and GPS are unchanged.
   const inset=radius+35*scale/2+20;

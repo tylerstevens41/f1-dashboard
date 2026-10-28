@@ -2,3 +2,4 @@
 # FastF1 and the importer's standalone geometry/registration dependency.
 fastf1==3.9.0
 numpy==2.3.5
+pandas==2.3.3

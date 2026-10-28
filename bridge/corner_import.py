@@ -52,7 +52,7 @@ def write(path, value):
     path.write_text(json.dumps(value, indent=2, allow_nan=False), encoding='utf-8')
 
 
-def fetch(year, event, session_name, cache):
+def fetch(year, event, session_name, cache, lap_collector=None):
     import fastf1
     cache = Path(cache)
     cache.mkdir(parents=True, exist_ok=True)
@@ -83,13 +83,16 @@ def fetch(year, event, session_name, cache):
         pos = lap.get_pos_data()[['X', 'Y']].dropna()
         if len(pos) < 100:
             raise ImportFailure('Insufficient reference-lap position data')
-        return {'schema': SCHEMA, 'year': year, 'event': event, 'session': session_name,
+        result = {'schema': SCHEMA, 'year': year, 'event': event, 'session': session_name,
                 'eventName': str(session.event.EventName), 'circuitKey': session.session_info['Meeting']['Circuit']['Key'],
                 'provider': 'FastF1 / MultiViewer', 'fastf1Version': fastf1.__version__,
                 'rotation': float(info.rotation), 'corners': normalize(info.corners.to_dict('records')),
                 'reference': pos.to_numpy().astype(float).tolist(),
                 'referenceLap': {'driver': str(lap.Driver), 'lap': int(lap.LapNumber)},
                 'warning': 'Visualization markers are manually created and not highly accurate. Distance is telemetry-derived; marshal sectors are not timing sectors.'}
+        if lap_collector is not None:
+            result['boundaryLaps']=lap_collector(session)
+        return result
     finally:
         prune()
 
@@ -233,11 +236,16 @@ def main():
     p.add_argument('--source-output')
     p.add_argument('--calibration')
     p.add_argument('--output')
+    p.add_argument('--with-sectors',action='store_true',help='Also calculate start/finish and sectors from multi-lap timing/GPS')
     args = p.parse_args()
     try:
         if not args.source_output and not args.output:
             raise ImportFailure('Specify --source-output and/or --output')
-        source = read(args.source_input) if args.source_input else fetch(args.year, args.event, args.session, args.cache)
+        collector=None
+        if args.with_sectors:
+            from .sector_import import collect_laps, add_boundaries
+            collector=collect_laps
+        source = read(args.source_input) if args.source_input else fetch(args.year, args.event, args.session, args.cache, lap_collector=collector)
         if not args.source_input:
             source.update(circuitId=args.circuit, layoutVersion=args.layout)
         if args.source_output:
@@ -245,7 +253,9 @@ def main():
         if args.output:
             if not args.calibration or Path(args.output).resolve() == Path(args.calibration).resolve():
                 raise ImportFailure('A separate existing --calibration is required; it is never overwritten')
-            result = align(source, read(args.calibration), args.circuit, args.layout)
+            calibration=read(args.calibration)
+            result = align(source, calibration, args.circuit, args.layout)
+            if args.with_sectors:result=add_boundaries(source,result,calibration)
             write(args.output, result)
             print(f"Imported {len(result['corners'])} provisional corners; alignment {result['alignment']}")
     except ImportFailure as exc:

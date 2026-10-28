@@ -64,3 +64,25 @@ test('all twenty imported corners render without provisional toggle; manual draf
   assert.doesNotMatch(renderToStaticMarkup(createElement(Renderer,{geometry,circuit:austin,annotations:hidden})),/data-layer="corner"/);
  }finally{await server.close();}
 });
+
+test('larger standalone corner circles retain offsets, fit suffixes and stay inside the viewBox', async()=>{
+ const server=await createServer({server:{middlewareMode:true},appType:'custom'});
+ try {
+  const {default:Renderer}=await server.ssrLoadModule('/src/circuits/CircuitRenderer.jsx');
+  const {defaultAppearance}=await server.ssrLoadModule('/src/circuits/annotations.js');
+  const geometry=createGeometry([{x:0,y:0},{x:100,y:0},{x:100,y:100},{x:0,y:100},{x:0,y:0}]);
+  const annotations={corners:[{number:20,letter:'A',at:0,offset:{x:-600,y:-800}}]};
+  const before=JSON.stringify(annotations);
+  const markup=renderToStaticMarkup(createElement(Renderer,{geometry,circuit:austin,annotations}));
+  const group=markup.match(/<g data-layer="corner"[^>]*>(.*?)<\/g>/s)[1];
+  assert.doesNotMatch(group,/<line\b/);assert.match(group,/20A/);
+  const circle=group.match(/<circle cx="([^"]+)" cy="([^"]+)" r="([^"]+)"/);
+  assert.equal(Number(circle[1]),50);assert.equal(Number(circle[2]),-50);
+  assert.ok(Number(circle[3])>=155*1.5);
+  const box=markup.match(/viewBox="([^"]+)"/)[1].split(' ').map(Number);
+  assert.ok(box[0]<50-Number(circle[3]));assert.ok(box[1]<-50-Number(circle[3]));
+  assert.match(markup,/preserveAspectRatio="xMidYMid meet"/);
+  const smaller=renderToStaticMarkup(createElement(Renderer,{geometry,circuit:austin,annotations,appearance:{...defaultAppearance,cornerLabelScale:1}}));
+  assert.match(smaller,/r="155"/);assert.equal(JSON.stringify(annotations),before);
+ }finally{await server.close();}
+});

@@ -1,6 +1,6 @@
 // Fractions refer to distance along the exact geometry path, not screen pixels.
 export const palette=['#ed3897','#f6ce42','#40bff2'];
-export const defaultAppearance={base:'charcoal',trackWidth:330,lineWidth:65,corners:true,boundaries:true,drs:true,speedTraps:true,startFinish:true,pitLane:true};
+export const defaultAppearance={base:'charcoal',trackWidth:330,lineWidth:65,cornerLabelScale:1.65,corners:true,boundaries:true,drs:true,speedTraps:true,startFinish:true,pitLane:true};
 export const bases={black:'#090b0e',charcoal:'#303743',grey:'#727982'};
 export const emptyAnnotations=(circuit,geometry)=>({schema:'f1-circuit-annotations-v1',circuitId:circuit.id,layoutVersion:circuit.layoutVersion,geometryId:geometryId(geometry),direction:1,startFinish:null,sector1End:null,sector2End:null,corners:[],detectionPoints:[],zones:[],speedTraps:[],pitLane:null,provenance:''});
 export function geometryId(geometry){

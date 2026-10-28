@@ -17,7 +17,17 @@ export default function CircuitRenderer({ geometry, circuit, drivers = [], selec
   const verified=modern && [features.startFinish,features.sector1End,features.sector2End].every(x=>x?.status==='verified');
   const sectors=modern && (verified||previewProvisional) ? sectorRanges(features) : null;
   const showFeature=f=>f && (!modern || f.status==='verified' || previewProvisional);
-  return <svg ref={svgRef} viewBox={`0 0 ${geometry.width} ${geometry.height}`} preserveAspectRatio="xMidYMid meet"
+  const scale=Math.max(1,Math.min(2,Number(appearance.cornerLabelScale)||defaultAppearance.cornerLabelScale));
+  const radius=155*scale;
+  const cornerLabels=appearance.corners ? (features.corners??[]).filter(f=>!f.hidden && (showFeature(f)||f.imported)).map(f=>{
+    const p=pointAt(geometry,f.at);
+    return {feature:f,x:p.x+(f.offset?.x??0),y:p.y+(f.offset?.y??-450)};
+  }) : [];
+  // Expand only the viewport when needed; anchors, offsets and GPS are unchanged.
+  const inset=radius+35*scale/2+20;
+  const left=Math.min(0,...cornerLabels.map(p=>p.x-inset)),top=Math.min(0,...cornerLabels.map(p=>p.y-inset));
+  const right=Math.max(geometry.width,...cornerLabels.map(p=>p.x+inset)),bottom=Math.max(geometry.height,...cornerLabels.map(p=>p.y+inset));
+  return <svg ref={svgRef} viewBox={`${left} ${top} ${right-left} ${bottom-top}`} preserveAspectRatio="xMidYMid meet"
     style={style ?? { width: "100%", height: "100%", display: "block", overflow: "visible" }} role="img" aria-label={`${circuit.name} circuit`} onClick={editingAnnotations?undefined:onClick} onClickCapture={editingAnnotations?onClick:undefined}>
     {showTrack && <g data-layer="track">
       {flag && circuit.flagColors[flag] && <path data-layer="race-control" d={geometry.path} fill="none" stroke={circuit.flagColors[flag]} strokeWidth={appearance.trackWidth+100} strokeLinecap="round" strokeLinejoin="round"/>}
@@ -29,13 +39,12 @@ export default function CircuitRenderer({ geometry, circuit, drivers = [], selec
     {appearance.pitLane && features.pitLane?.path && showFeature(features.pitLane) && <path data-layer="pit-lane" d={features.pitLane.path} fill="none" stroke="#999" strokeWidth="75"/>}
     {appearance.drs && (features.detectionPoints??[]).filter(showFeature).map((f,i)=>{const p=pointAt(geometry,f.at);return <circle data-layer="detection" key={i} cx={p.x} cy={p.y} r="60" fill="#1dd58a"/>;})}
     {appearance.speedTraps && (features.speedTraps??[]).filter(showFeature).map((f,i)=>{const p=pointAt(geometry,f.at);return <text data-layer="speed-trap" key={i} x={p.x} y={p.y-220} fill="white" fontSize="180">{f.label??'SPEED'}</text>;})}
-    {appearance.corners && (features.corners??[]).filter(f=>!f.hidden && (showFeature(f)||f.imported)).map((f,i)=>{
-      const p=pointAt(geometry,f.at),selected=annotationSelection?.kind==='corner' && cornerKey(annotationSelection)===cornerKey(f);
-      const x=p.x+(f.offset?.x??0),y=p.y+(f.offset?.y??-450);
+    {cornerLabels.map(({feature:f,x,y},i)=>{
+      const selected=annotationSelection?.kind==='corner' && cornerKey(annotationSelection)===cornerKey(f);
+      const label=modern?cornerKey(f):`T${cornerKey(f)}`;
       return <g data-layer="corner" data-corner={cornerKey(f)} key={i} pointerEvents="none">
-        <line x1={p.x} y1={p.y} x2={x} y2={y} stroke={selected?'#ffd43b':'#8792a3'} strokeWidth="15"/>
-        <circle cx={x} cy={y} r="155" fill="#151a23" stroke={selected?'#ffd43b':'#e4e8ef'} strokeWidth={selected?35:18}/>
-        <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize="155" fill="white">{modern?cornerKey(f):`T${cornerKey(f)}`}</text>
+        <circle cx={x} cy={y} r={radius} fill="#151a23" stroke={selected?'#ffd43b':'#e4e8ef'} strokeWidth={(selected?35:18)*scale}/>
+        <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize={145*scale*Math.min(1,3/label.length)} fill="white">{label}</text>
       </g>;
     })}
     {appearance.boundaries && (modern?[features.sector1End,features.sector2End]:features.sectors??[]).filter(showFeature).map((f,i)=>{const p=pointAt(geometry,f.at);return <g data-layer="sector-boundary" key={i} transform={`translate(${p.x} ${p.y}) rotate(${p.angle})`}><line y1="-210" y2="210" stroke="white" strokeWidth="30"/><text x="230" y="-230" transform={`rotate(${-p.angle})`} fill="white" fontSize="160">{f.label??`S${i+1}`}</text></g>;})}

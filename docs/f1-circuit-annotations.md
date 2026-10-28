@@ -156,7 +156,7 @@ Start the frontend in another terminal:
 npm run dev
 ```
 
-Load the same Austin TEST race around offset 5600. The dashboard loads `austin-sectors.json` automatically; use **Reload annotation files** if already open. Calculated provisional boundaries display automatically as magenta/yellow/cyan segments plus the perpendicular finish marker. Existing non-null manual/reviewed boundary positions take precedence; they are not overwritten. Diagnostics and the editor show the original calculated fraction, spread and any override. To use a calculated position instead of an existing reviewed position, export/back up the reviewed annotations and click **Use calculated position (replace this override)** for that selected boundary. This explicit action preserves the prior position in `previousOverride`; it does not erase your whole file. Manual changes preserve `sourceEstimate` and set `manualOverride`; explicit deletion is also preserved. The finish origin is independent of the arbitrary first geometry point. No boundary ever defaults to an equal third.
+Load the same Austin TEST race around offset 5600. The dashboard loads `austin-sectors.json` automatically; use **Reload annotation files** if already open. Calculated provisional boundaries display automatically as magenta/yellow/cyan segments plus the perpendicular finish marker. Calculated boundaries are now the default. Old manual/reviewed positions are retained as recoverable manual records and do not silently take precedence. The editor's per-boundary **Boundary position source** selector explicitly selects Calculated or Saved manual override; **Use calculated position** remains available. Source selection, manual records and manual history are stored separately in browser-local preferences keyed by circuit/layout/geometry and included in exported annotation JSON. No old manual files or browser drafts are deleted. Manual placement/editing explicitly selects Manual for that boundary. The finish origin is independent of the arbitrary first geometry point. No boundary ever defaults to an equal third.
 
 The 1.65× corner label size is unchanged. **Corner label spacing** defaults to 1.15× and multiplies each existing offset vector only at render time, including manually adjusted vectors; it never rewrites stored offsets or anchors. Viewport padding accounts for the larger spacing; connector lines remain absent.
 
@@ -225,3 +225,34 @@ python -m bridge.sector_import --source-input data-cache/austin-fastf1-boundarie
 ```
 
 This is an explicit reference-based alternative, not a time-offset fit. Outputs still remain provisional: a user-supplied reference does not automatically prove its own registration. `bridge.boundary_audit` accepts the same option for independent error measurement without changing annotations. Real Austin accuracy remains unverified until the local files/browser chain and reliable physical line evidence agree.
+
+## Default calculated boundaries and explicit manual source selection
+
+The user confirmed the calculation-only preview is visually suitable for the Austin dashboard. The normal renderer now uses those same calculated records by default whenever a valid calculated file exists. Legacy `manualOverride`, `preferCalculated`, reviewed status, manual JSON files and old browser drafts alone no longer select manual coordinates. They remain preserved and recoverable. This changes display precedence only: calculated coordinates, provisional status, source provenance, FIA warnings and accuracy/precision diagnostics are unchanged.
+
+In **Annotation editor**, select Start/finish, Sector 1 end or Sector 2 end, then choose **Boundary position source**:
+
+- **Calculated (default)** uses the loaded calculation for that boundary.
+- **Saved manual override** explicitly selects the retained manual position. The editor and boundary audit name the displayed source.
+- Clicking to place/move a boundary or editing its offsets explicitly creates/selects a manual override. Switching back to Calculated does not delete that manual record.
+- Prior reviewed/manual positions remain in manual history and can be restored with **Recover previous manual position**. Exported JSON includes selections, manual records and history.
+
+New source-choice preferences use `f1-boundary-sources-<circuit>-<layout>-<geometry>` browser storage. They are read in both development and production. Old draft keys are retained; no storage clearing is required after pulling this change. A new calibration/layout uses a different key so incompatible positions cannot leak across layouts. Browser storage failures are reported; export your annotations if persistence is unavailable. Cosmetic preferences and corner overrides are unaffected.
+
+If calculated data is missing, existing valid manual data is retained as an explicitly reported fallback, or boundaries remain unavailable; there is no equal-thirds fallback. When a calculated file returns, the default calculated selection takes effect again. Explicit manual selection remains manual across reloads. The calculation-only preview remains temporary and never changes the saved source selection. With all sources set to Calculated, preview and normal rendering use identical boundary records.
+
+### Windows local check (no importer run required)
+
+```powershell
+git switch feat/f1-circuit-annotations
+git pull --ff-only origin feat/f1-circuit-annotations
+.\.venv\Scripts\python.exe -m bridge.server --login --idle --allow-test
+```
+
+In a second terminal:
+
+```powershell
+npm run dev
+```
+
+Reload the dashboard with your existing `austin-calibration.json`, `austin-corners.json` and `austin-sectors.json`. Leave **Preview calculated boundaries only** OFF: the normal display should match the preview you already tested. In the editor, choose S1 and select Saved manual override; only S1 should move. Refresh to confirm the explicit choice remains. Choose Calculated (or Use calculated position), then refresh again: S1 should stay calculated and the old manual fraction should remain available. Repeat for start/finish and S2 if desired. FIA warnings and provisional status must remain visible. No session download, corner re-import, recalibration, file replacement or deletion is required.

@@ -5,11 +5,12 @@ export function boundaryDisplayAudit(annotations,geometry,files={}){
   return boundaryKeys.map(key=>{
     const feature=annotations[key],computed=feature?.sourceEstimate?.at??files.sectorFile?.[key]?.at;
     let origin=feature?.calculated?(files.calculatedOrigin??'calculated-file'):'unconfigured';
-    for(const [name,file] of [['corner-file',files.cornerFile],['manual-file',files.annotationFile],['browser-draft',files.saved],['in-memory-edit',files.draft]]){
+    if(annotations.boundaryEffectiveSources?.[key])origin=annotations.boundaryEffectiveSources[key];
+    else for(const [name,file] of [['corner-file',files.cornerFile],['manual-file',files.annotationFile],['browser-draft',files.saved],['in-memory-edit',files.draft]]){
       const entry=file?.[key];
       if(entry && feature && entry.at===feature.at && (entry.manualOverride||entry.status==='verified'||!entry.calculated))origin=name;
     }
-    if(feature?.preferCalculated && !feature.manualOverride)origin='explicit-calculated-choice';
+    if(!annotations.boundaryEffectiveSources && feature?.preferCalculated && !feature.manualOverride)origin='explicit-calculated-choice';
     const different=Number.isFinite(computed) && feature && Math.abs(circularDelta(feature.at,computed))>1e-6;
     return {key,calculatedAt:computed??null,displayedAt:feature?.at??null,origin,different:Boolean(different),
       deltaNative:different?circularDelta(feature.at,computed)*geometry.total:0,
@@ -17,6 +18,11 @@ export function boundaryDisplayAudit(annotations,geometry,files={}){
   });
 }
 export function calculatedBoundaryPreview(annotations){
+  if(annotations.boundaryCalculatedPositions){
+    const entries=boundaryKeys.filter(k=>annotations.boundaryCalculatedPositions[k]).map(k=>[k,{...annotations.boundaryCalculatedPositions[k],manualOverride:false,explicitManualSelection:false}]);
+    if(!entries.length)return annotations;
+    return {...annotations,...Object.fromEntries(entries),direction:annotations.boundaryCalculatedDirection??annotations.direction,boundaryEffectiveSources:{...annotations.boundaryEffectiveSources,...Object.fromEntries(entries.map(([k])=>[k,'calculated-preview']))}};
+  }
   if(!boundaryKeys.every(k=>Number.isFinite(annotations[k]?.sourceEstimate?.at)))return annotations;
   return {...annotations,direction:annotations.boundaryDiagnostics?.registration?.direction??annotations.direction,
     ...Object.fromEntries(boundaryKeys.map(k=>[k,{...annotations[k],at:annotations[k].sourceEstimate.at,calculated:true,manualOverride:false,status:'provisional'}]))};

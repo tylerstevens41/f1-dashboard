@@ -11,6 +11,8 @@ export function geometryId(geometry){
 const validFraction=x=>typeof x==='number' && Number.isFinite(x) && x>=0 && x<1;
 export function validateAnnotations(data,circuit,geometry){
   if(!data || data.schema!=='f1-circuit-annotations-v1' || data.circuitId!==circuit.id || data.layoutVersion!==circuit.layoutVersion || data.geometryId!==geometryId(geometry))throw Error('Annotation circuit, layout, or geometry mismatch');
+  if(data.boundarySources && Object.values(data.boundarySources).some(v=>!['calculated','manual'].includes(v)))throw Error('Invalid boundary source selection');
+  if(data.boundaryManualPositions && Object.values(data.boundaryManualPositions).some(p=>p!==null && !validBoundary(p)))throw Error('Invalid saved manual boundary');
   if(![1,-1].includes(data.direction))throw Error('Direction must be 1 or -1');
   for(const key of ['startFinish','sector1End','sector2End']) if(data[key]!==null && (!validFraction(data[key]?.at)||!['provisional','verified'].includes(data[key]?.status)))throw Error(`Invalid ${key}`);
   if(!Array.isArray(data.corners)||data.corners.some(c=>!Number.isInteger(c.number)||c.number<1||! /^[A-Za-z]*$/.test(c.letter??'')||!validFraction(c.at)||!['provisional','verified'].includes(c.status)) || new Set(data.corners.map(c=>`${c.number}${c.letter??''}`)).size!==data.corners.length)throw Error('Invalid corners');
@@ -72,5 +74,56 @@ export function placeAnnotation(value,placing,at){
     const feature={...existing,number:placing.number,letter:placing.letter??'',at,status:'provisional',hidden:false,manualOverride:true};
     return {...value,corners:[...value.corners.filter(c=>cornerKey(c)!==key),feature]};
   }
-  return {...value,boundaryOverrides:{...value.boundaryOverrides,[placing.kind]:false},[placing.kind]:{...value[placing.kind],at,status:'provisional',manualOverride:true}};
+  return editManualBoundary({...value,boundaryOverrides:{...value.boundaryOverrides,[placing.kind]:false}},placing.kind,{at});
+}
+
+export const boundaryNames=['startFinish','sector1End','sector2End'];
+const validBoundary=p=>p && validFraction(p.at) && ['provisional','verified'].includes(p.status);
+// Source selection is separate from legacy manualOverride/preferCalculated flags.
+// Old positions are retained, but only the new explicit choice can select them.
+export function resolveBoundarySources(merged,calculated=null,selection={}){
+  selection=selection??{};
+  const manual=Object.fromEntries(Object.entries({...merged.boundaryManualPositions,...selection.manualPositions}).filter(([,p])=>p===null||validBoundary(p)));
+  const rawHistory={...merged.boundaryManualHistory,...selection.manualHistory};
+  const history=Object.fromEntries(boundaryNames.filter(k=>Array.isArray(rawHistory[k])).map(k=>[k,rawHistory[k].filter(validBoundary)]));
+  const calculations={};
+  const requested=Object.fromEntries(boundaryNames.map(k=>[k,(selection.sources?.[k]??merged.boundarySources?.[k])==='manual'?'manual':'calculated']));
+  const effective={};
+  const result={...merged};
+  for(const key of boundaryNames){
+    const raw=calculated?.[key];
+    const calc=validBoundary(raw) && raw.calculated ? raw : null;
+    if(calc)calculations[key]=calc;
+    const existing=merged[key];
+    if(!validBoundary(manual[key]) && validBoundary(existing) &&
+      (!existing.calculated || existing.manualOverride || existing.status==='verified' || (calc && Math.abs(existing.at-calc.at)>1e-8)))manual[key]=existing;
+    if(!validBoundary(manual[key]) && validBoundary(existing?.previousOverride))manual[key]=existing.previousOverride;
+    const wanted=requested[key]==='manual'?'manual':'calculated';
+    requested[key]=wanted;
+    if(wanted==='manual' && validBoundary(manual[key])){
+      result[key]={...manual[key],manualOverride:true,explicitManualSelection:true,sourceEstimate:calc?.sourceEstimate??manual[key].sourceEstimate};effective[key]='manual';
+    }else if(calc){
+      result[key]={...calc,manualOverride:false,explicitManualSelection:false};effective[key]=wanted==='manual'?'calculated-fallback-no-manual':'calculated';
+    }else if(validBoundary(manual[key])){
+      result[key]=manual[key];effective[key]='manual-fallback-no-calculated';
+    }else {result[key]=null;effective[key]='unavailable';}
+  }
+  const allManual=boundaryNames.every(k=>effective[k]==='manual');
+  result.direction=calculated && !(allManual && merged.manualDirection)?calculated.direction:merged.direction;
+  return {...result,boundarySources:requested,boundaryEffectiveSources:effective,boundaryManualPositions:manual,boundaryManualHistory:history,
+    boundaryCalculatedPositions:calculations,boundaryCalculatedDirection:calculated?.direction};
+}
+export function chooseBoundarySource(value,key,source){
+  if(!boundaryNames.includes(key)||!['calculated','manual'].includes(source))throw Error('Invalid boundary source choice');
+  const requested={...value.boundarySources,[key]:source};
+  const calculated={...value.boundaryCalculatedPositions,direction:value.boundaryCalculatedDirection??value.direction};
+  return resolveBoundarySources({...value,boundarySources:requested},calculated,{sources:requested,manualPositions:value.boundaryManualPositions,manualHistory:value.boundaryManualHistory});
+}
+export function editManualBoundary(value,key,patch){
+  const previous=value.boundaryManualPositions?.[key]??value[key]??{};
+  const record={...previous,...patch,status:patch.status??'provisional',manualOverride:true};
+  const history={...value.boundaryManualHistory};
+  if(validBoundary(value.boundaryManualPositions?.[key]))history[key]=[...(history[key]??[]),value.boundaryManualPositions[key]];
+  const manual={...value.boundaryManualPositions,[key]:record};
+  return chooseBoundarySource({...value,boundaryManualPositions:manual,boundaryManualHistory:history,[key]:record},key,'manual');
 }

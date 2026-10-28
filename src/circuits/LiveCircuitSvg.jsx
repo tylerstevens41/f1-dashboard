@@ -6,7 +6,7 @@ import { calibrationGeometry, validateCalibration } from './calibration';
 import { findCircuit } from './registry';
 import AnnotationEditor from './AnnotationEditor';
 import AppearancePanel from './AppearancePanel';
-import { defaultAppearance, emptyAnnotations, geometryId, nearestFraction, validateAnnotations } from './annotations';
+import { defaultAppearance, emptyAnnotations, geometryId, nearestFraction, validateAnnotations, mergeImportedCorners, placeAnnotation } from './annotations';
 import './live-circuit.css';
 
 
@@ -21,6 +21,8 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
   const [draft,setDraft]=useState(null);
   const [placing,setPlacing]=useState(null);
   const [preview,setPreview]=useState(false);
+  const [selection,setSelection]=useState(null);
+  const [placementError,setPlacementError]=useState('');
   const [appearance,setAppearance]=useState(()=>{try{return {...defaultAppearance,...JSON.parse(localStorage.getItem('f1-track-appearance')||'{}')};}catch{return defaultAppearance;}});
   const [layers,setLayers]=useState({outline:true,raw:false,transformed:false,alignedSvg:false,original:false,drivers:true});
   useEffect(()=>{ if(animation && circuit) animation.configure(circuit.motion); },[animation,circuit]);
@@ -46,7 +48,12 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
         if(ar.ok && ar.headers.get('content-type')?.includes('json')) {
           try {annotationFile=await ar.json();} catch {warning='Annotation JSON is invalid; circuit remains unconfigured.';}
         }
-        if(!controller.signal.aborted){setLoaded({legacy:legacy.points,calibration,annotationFile});setError(warning);}
+        let cornerFile=null;
+        try {
+          const cr=await fetch(circuit.cornerFile,{signal:controller.signal,cache:'no-store'});
+          if(cr.ok && cr.headers.get('content-type')?.includes('json')) cornerFile=await cr.json();
+        } catch(err) {if(err.name==='AbortError')throw err;warning='Imported corner file is invalid or unavailable.';}
+        if(!controller.signal.aborted){setLoaded({legacy:legacy.points,calibration,annotationFile,cornerFile});setError(warning);}
       }catch(err){if(err.name!=='AbortError')setError(err.message);}
     }
     load();return()=>controller.abort();
@@ -55,21 +62,26 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
   const annotations=useMemo(()=>{
     if(!geometry || !circuit)return null;
     const id=geometryId(geometry);
-    if(draft?.geometryId===id && draft?.circuitId===circuit.id && draft?.layoutVersion===circuit.layoutVersion)return draft;
-    if(import.meta.env.DEV){try{const saved=JSON.parse(localStorage.getItem(`f1-annotations-${circuit.id}-${circuit.layoutVersion}-${id}`)||'null');if(saved)return validateAnnotations(saved,circuit,geometry);}catch{ /* incompatible drafts are never applied */ }}
-    try {if(loaded?.annotationFile)return validateAnnotations(loaded.annotationFile,circuit,geometry);}catch{ /* layout mismatch remains unconfigured */ }
-    return emptyAnnotations(circuit,geometry);
+    let base=emptyAnnotations(circuit,geometry);
+    try {if(loaded?.cornerFile)base=validateAnnotations(loaded.cornerFile,circuit,geometry);} catch(err) {base.loadError=err.message;}
+    try {if(loaded?.annotationFile)base=mergeImportedCorners(base,validateAnnotations(loaded.annotationFile,circuit,geometry));} catch(err) {base.loadError=err.message;}
+    if(draft?.geometryId===id && draft?.circuitId===circuit.id && draft?.layoutVersion===circuit.layoutVersion)return mergeImportedCorners(base,draft);
+    if(import.meta.env.DEV){try{const saved=JSON.parse(localStorage.getItem(`f1-annotations-${circuit.id}-${circuit.layoutVersion}-${id}`)||'null');if(saved)return mergeImportedCorners(base,validateAnnotations(saved,circuit,geometry));}catch{ /* incompatible drafts are never applied */ }}
+    return base;
   },[geometry,circuit,draft,loaded]);
-  const changeAnnotations=value=>{setDraft(value);try{localStorage.setItem(`f1-annotations-${circuit.id}-${circuit.layoutVersion}-${value.geometryId}`,JSON.stringify(value));}catch{ /* storage optional */ }};
+  const changeAnnotations=value=>{setPreview(true);setDraft(value);try{localStorage.setItem(`f1-annotations-${circuit.id}-${circuit.layoutVersion}-${value.geometryId}`,JSON.stringify(value));}catch{ /* storage optional */ }};
   const changeAppearance=value=>{setAppearance(value);try{localStorage.setItem('f1-track-appearance',JSON.stringify(value));}catch{ /* storage optional */ }};
   const place=event=>{
     if(!placing||!geometry||!annotations)return;
-    const svg=event.currentTarget,point=svg.createSVGPoint();point.x=event.clientX;point.y=event.clientY;
-    const matrix=svg.getScreenCTM();if(!matrix)return;const pos=point.matrixTransform(matrix.inverse());
-    const at=nearestFraction(geometry,pos.x,pos.y),feature={at,status:'provisional'};
-    if(placing.kind==='corner')changeAnnotations({...annotations,corners:[...annotations.corners.filter(c=>c.number!==placing.number),{...feature,number:placing.number}]});
-    else changeAnnotations({...annotations,[placing.kind]:feature});
-    setPlacing(null);
+    event.stopPropagation();
+    try {
+      const svg=event.currentTarget,point=svg.createSVGPoint();point.x=event.clientX;point.y=event.clientY;
+      const matrix=svg.getScreenCTM();if(!matrix)throw Error('SVG transform is unavailable');const pos=point.matrixTransform(matrix.inverse());
+      const at=nearestFraction(geometry,pos.x,pos.y);
+      changeAnnotations(placeAnnotation(annotations,placing,at));
+      setSelection(placing);setPlacementError('');setPlacing(null);
+    } catch(err) {setPlacementError(err.message);}
+
   };
   const markers=useMemo(()=>{
     if(!geometry)return [];
@@ -98,14 +110,15 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
       <p>Start/finish: {calibration?.startFinish?.status??'not established'}. No car is snapped to this path.</p>
       <button onClick={()=>setRevision(v=>v+1)}>Reload calibration JSON</button>
     </div>}
-    {import.meta.env.DEV && geometry && annotations && <><AppearancePanel value={appearance} onChange={changeAppearance} preview={preview} setPreview={setPreview}/><AnnotationEditor circuit={circuit} geometry={geometry} value={annotations} onChange={changeAnnotations} placing={placing} setPlacing={setPlacing}/><div className="calibration-debug-panel">Annotations: {[annotations.startFinish,annotations.sector1End,annotations.sector2End].every(x=>x?.status==='verified')?'verified': 'unverified / incomplete'} · {annotations.corners.length} corners placed · {placing?'click track to place':''}</div></>}
+    {import.meta.env.DEV && geometry && annotations && <><AppearancePanel value={appearance} onChange={changeAppearance} preview={preview} setPreview={setPreview}/><AnnotationEditor circuit={circuit} geometry={geometry} value={annotations} onChange={changeAnnotations} placing={placing} setPlacing={setPlacing} onSelect={setSelection}/><button onClick={()=>setRevision(v=>v+1)}>Reload annotation files</button><div className="calibration-debug-panel">Annotations: {[annotations.startFinish,annotations.sector1End,annotations.sector2End].every(x=>x?.status==='verified')?'verified': 'unverified / incomplete'} · {annotations.corners.length} corners · FastF1 alignment: {annotations.alignment?.status??'not loaded'} · held-out RMS {annotations.alignment?.heldOutRms?.toFixed(1)??'—'}, p95 {annotations.alignment?.heldOutP95?.toFixed(1)??'—'} native units · {placing?'click track to place':''}</div></>}
     {import.meta.env.DEV && animation && <AnimationDiagnostics animation={animation}/>}
+    {(placementError||annotations?.loadError) && <p role="alert" className="calibration-error">{placementError||annotations.loadError}</p>}
     {error && <p role="alert" className="calibration-error">{error}</p>}
     <div className="live-circuit-viewport">
       {geometry?<CircuitRenderer geometry={geometry} circuit={circuit} drivers={layers.drivers?markers:[]}
         selectedDriver={selectedDriver} onSelectDriver={onSelectDriver} animate animation={animation}
         showLabels={labels} showTrack={!debug||layers.outline} annotations={annotations} appearance={appearance}
-        annotationsCalibrated={true} previewProvisional={import.meta.env.DEV && preview} onClick={place}>
+        annotationsCalibrated={true} previewProvisional={import.meta.env.DEV && preview} annotationSelection={selection} editingAnnotations={import.meta.env.DEV && Boolean(placing)} onClick={place}>
         {import.meta.env.DEV && debug && <CalibrationLayers calibration={calibration} geometry={geometry} circuit={circuit} layers={layers}/>}
       </CircuitRenderer>:<p>Loading circuit geometry…</p>}
     </div>

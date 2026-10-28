@@ -13,7 +13,7 @@ export function validateAnnotations(data,circuit,geometry){
   if(!data || data.schema!=='f1-circuit-annotations-v1' || data.circuitId!==circuit.id || data.layoutVersion!==circuit.layoutVersion || data.geometryId!==geometryId(geometry))throw Error('Annotation circuit, layout, or geometry mismatch');
   if(![1,-1].includes(data.direction))throw Error('Direction must be 1 or -1');
   for(const key of ['startFinish','sector1End','sector2End']) if(data[key]!==null && (!validFraction(data[key]?.at)||!['provisional','verified'].includes(data[key]?.status)))throw Error(`Invalid ${key}`);
-  if(!Array.isArray(data.corners)||data.corners.some(c=>!Number.isInteger(c.number)||c.number<1||!validFraction(c.at)||!['provisional','verified'].includes(c.status)) || new Set(data.corners.map(c=>c.number)).size!==data.corners.length)throw Error('Invalid corners');
+  if(!Array.isArray(data.corners)||data.corners.some(c=>!Number.isInteger(c.number)||c.number<1||! /^[A-Za-z]*$/.test(c.letter??'')||!validFraction(c.at)||!['provisional','verified'].includes(c.status)) || new Set(data.corners.map(c=>`${c.number}${c.letter??''}`)).size!==data.corners.length)throw Error('Invalid corners');
   for(const k of ['detectionPoints','zones','speedTraps'])if(!Array.isArray(data[k]))throw Error(`Invalid ${k}`);
   for(const k of ['detectionPoints','speedTraps'])if(data[k].some(x=>!validFraction(x.at)||!['provisional','verified'].includes(x.status)))throw Error(`Invalid ${k}`);
   if(data.zones.some(x=>!validFraction(x.start)||!validFraction(x.end)||x.start===x.end||!['provisional','verified'].includes(x.status)))throw Error('Invalid zones');
@@ -44,4 +44,20 @@ export function nearestFraction(geometry,x,y){
     if(dist<best){best=dist;distance=geometry.lengths[i-1]+t*Math.sqrt(den);}
   }
   return Math.min(0.999999999,distance/geometry.total);
+}
+
+export const cornerKey=c=>`${c.number}${c.letter??''}`;
+export function mergeImportedCorners(base, edits){
+  const corners=new Map((base.corners??[]).map(c=>[cornerKey(c),c]));
+  for(const c of edits?.corners??[])corners.set(cornerKey(c),{...corners.get(cornerKey(c)),...c});
+  return {...base,...edits,corners:[...corners.values()],importSource:base.importSource??edits?.importSource,alignment:base.alignment??edits?.alignment};
+}
+export function placeAnnotation(value,placing,at){
+  if(!Number.isFinite(at)||at<0||at>=1)throw Error('Placement could not be mapped to the track');
+  if(placing.kind==='corner'){
+    const key=cornerKey(placing),existing=value.corners.find(c=>cornerKey(c)===key);
+    const feature={...existing,number:placing.number,letter:placing.letter??'',at,status:'provisional',hidden:false,manualOverride:true};
+    return {...value,corners:[...value.corners.filter(c=>cornerKey(c)!==key),feature]};
+  }
+  return {...value,[placing.kind]:{...value[placing.kind],at,status:'provisional'}};
 }

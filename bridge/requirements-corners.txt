@@ -1,0 +1,2 @@
+# Offline development importer only; not required for LiveF1 production ingestion.
+fastf1==3.9.0

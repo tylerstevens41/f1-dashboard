@@ -34,3 +34,17 @@ test('appearance settings have no effect on GPS projection',()=>{
  const p=geometry.project(3,7);const cosmetic={...defaultAppearance,base:'black',trackWidth:600,lineWidth:20};
  assert.equal(cosmetic.base,'black');assert.deepEqual(geometry.project(3,7),p);
 });
+
+test('corner letters are unique IDs; manual edits preserve imported defaults and original source',async()=>{
+ const {mergeImportedCorners,placeAnnotation}=await import('../src/circuits/annotations.js');
+ const original={number:2,letter:'A',at:.2,status:'provisional',imported:true,source:{x:123,y:456}};
+ const base={...emptyAnnotations(circuit,geometry),corners:[original,{...original,letter:'B',at:.3}],importSource:{provider:'fixture'}};
+ validateAnnotations(base,circuit,geometry);
+ const edit=placeAnnotation(base,{kind:'corner',number:2,letter:'A'},.25);
+ assert.equal(edit.corners.find(c=>c.letter==='A').at,.25);assert.equal(base.corners[0].at,.2);
+ assert.deepEqual(edit.corners.find(c=>c.letter==='A').source,original.source);
+ const merged=mergeImportedCorners(base,{corners:[{number:2,letter:'B',at:.3,status:'provisional',hidden:true}]});
+ assert.equal(merged.corners.length,2);assert.equal(merged.corners[1].hidden,true);
+ assert.deepEqual(merged.importSource,base.importSource);
+ assert.throws(()=>placeAnnotation(base,{kind:'startFinish'},NaN));
+});

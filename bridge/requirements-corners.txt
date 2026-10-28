@@ -1,2 +1,4 @@
-# Offline development importer only; not required for LiveF1 production ingestion.
+# Install ONLY in .venv-fastf1; incompatible with the LiveF1 environment.
+# FastF1 and the importer's standalone geometry/registration dependency.
 fastf1==3.9.0
+numpy==2.3.5

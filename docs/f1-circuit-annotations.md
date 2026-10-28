@@ -44,23 +44,54 @@ The importer never changes calibration coordinates or the LiveF1 mapping. It doe
 
 ### PowerShell: import once, load automatically
 
-Keep your existing local calibration. From the repository:
+Keep your existing `.venv` and `public/circuits/austin-calibration.json`. LiveF1 1.3.0 and FastF1 3.9.0 require incompatible pandas versions: **never install their requirements together**. Use Python 3.12 for these commands. Activation is per terminal; explicit executable paths below also prevent accidentally using the wrong environment.
+
+Pull this branch first:
 
 ```powershell
 git switch feat/f1-circuit-annotations
 git pull --ff-only origin feat/f1-circuit-annotations
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r bridge/requirements.txt -r bridge/requirements-corners.txt
-python -m bridge.corner_import --year 2026 --event "United States" --session R --circuit austin --layout austin-livef1-v1 --source-output data-cache/austin-fastf1-2026.json
-python -m bridge.corner_import --source-input data-cache/austin-fastf1-2026.json --calibration public/circuits/austin-calibration.json --circuit austin --layout austin-livef1-v1 --output public/circuits/austin-corners.json
-python -m bridge.server --login --idle --allow-test
 ```
 
-Use a second terminal:
+Terminal 1: existing LiveF1 environment (create only if absent). Do not recreate or delete your working environment or change its pandas version:
+
+```powershell
+if (!(Test-Path .\.venv\Scripts\python.exe)) { py -3.12 -m venv .venv }
+.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe -m pip install -r bridge/requirements.txt
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -m bridge.server --login --idle --allow-test
+```
+
+Terminal 2: separate offline importer. Its only project imports are standard library and NumPy; FastF1 is imported lazily for fetching. It does not import LiveF1, `bridge.calibrate`, SVG tooling, or the backend. The calibration is read as JSON, never executed or overwritten.
+
+```powershell
+if (!(Test-Path .\.venv-fastf1\Scripts\python.exe)) { py -3.12 -m venv .venv-fastf1 }
+.\.venv-fastf1\Scripts\Activate.ps1
+.\.venv-fastf1\Scripts\python.exe -m pip install -r bridge/requirements-corners.txt
+.\.venv-fastf1\Scripts\python.exe -m pip check
+.\.venv-fastf1\Scripts\python.exe -c "import fastf1; print(fastf1.__version__)"
+.\.venv-fastf1\Scripts\python.exe -m bridge.corner_import --year 2026 --event "United States" --session R --circuit austin --layout austin-livef1-v1 --source-output data-cache/austin-fastf1-2026.json
+.\.venv-fastf1\Scripts\python.exe -m bridge.corner_import --source-input data-cache/austin-fastf1-2026.json --calibration public/circuits/austin-calibration.json --circuit austin --layout austin-livef1-v1 --output public/circuits/austin-corners.json
+```
+
+If a suitable cached `data-cache/austin-fastf1-2026.json` already exists, skip fetching and run only the second importer command. Otherwise the first command must succeed before alignment. The generated JSON is the only interface between importer and frontend: Vite and the LiveF1 bridge need neither FastF1 nor the importer environment running.
+
+Terminal 3 (no Python environment needed):
 
 ```powershell
 npm ci
 npm run dev
+```
+
+For checks in the correct environments:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s bridge/tests
+.\.venv-fastf1\Scripts\python.exe -m unittest bridge.tests.test_corner_import
+npm test
+npm run lint
+npm run build
 ```
 
 The importer refuses to overwrite an existing output. For another attempt, use a new output name, inspect it, then replace only the reviewed `austin-corners.json`; never remove the calibration. Failed fetches require checking data access locally. Our 2026 Austin attempt obtained session metadata but no timing/car/position telemetry without authentication, so no 20-corner export or local Austin alignment was verified here. Your LiveF1 login is not automatically FastF1's login. FastF1 3.9.0 can use backend-only `F1_USERNAME`/`F1_PASSWORD`; if needed, set these only in the importer terminal using `Get-Credential` and remove them immediately afterward. Never add credentials to React, JSON, commands in shared logs, or Git. No alternate paid service or silent prior-season fallback is used. An explicitly chosen accessible historical session is allowed but must be labelled with that actual season and verified against the intended layout.
@@ -78,7 +109,7 @@ $fastF1Credential = Get-Credential
 try {
     $env:F1_USERNAME = $fastF1Credential.UserName
     $env:F1_PASSWORD = $fastF1Credential.GetNetworkCredential().Password
-    python -m bridge.corner_import --year 2026 --event "United States" --session R --source-output data-cache/austin-fastf1-2026.json
+    .\.venv-fastf1\Scripts\python.exe -m bridge.corner_import --year 2026 --event "United States" --session R --source-output data-cache/austin-fastf1-2026.json
 } finally {
     Remove-Item Env:F1_USERNAME -ErrorAction SilentlyContinue
     Remove-Item Env:F1_PASSWORD -ErrorAction SilentlyContinue

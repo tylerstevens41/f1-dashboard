@@ -23,6 +23,7 @@ dist-ssr
 __pycache__/
 *.pyc
 .venv/
+.venv-fastf1/
 venv/
 
 # Downloaded F1 replay data cache

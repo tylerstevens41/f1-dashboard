@@ -78,3 +78,24 @@ class CornerImporterTests(unittest.TestCase):
         script="import {createGeometry} from './src/circuits/geometry.js';import {geometryId} from './src/circuits/annotations.js';console.log(geometryId(createGeometry([{x:0,y:0},{x:10,y:0},{x:10,y:10},{x:0,y:0}])));"
         actual=subprocess.check_output(['node','--input-type=module','-e',script],text=True).strip()
         self.assertEqual(actual,geometry_id([[0,0],[10,0],[10,10],[0,0]]))
+
+    def test_cached_source_cli_reads_calibration_without_livef1_or_fastf1_import(self):
+        import hashlib
+        import json
+        import subprocess
+        import sys
+        from pathlib import Path
+        data, calibration, _, _ = fixture()
+        with tempfile.TemporaryDirectory() as folder:
+            source=Path(folder)/'source.json'
+            target=Path(folder)/'calibration.json'
+            output=Path(folder)/'corners.json'
+            source.write_text(json.dumps(data),encoding='utf-8')
+            target.write_text(json.dumps(calibration),encoding='utf-8')
+            before=hashlib.sha256(target.read_bytes()).hexdigest()
+            subprocess.run([sys.executable,'-m','bridge.corner_import','--source-input',str(source),
+                            '--calibration',str(target),'--circuit','test','--layout','v1',
+                            '--output',str(output)],check=True,capture_output=True,text=True)
+            self.assertEqual(len(json.loads(output.read_text())['corners']),20)
+            self.assertEqual(before,hashlib.sha256(target.read_bytes()).hexdigest())
+        subprocess.run([sys.executable,'-c',"import sys; import bridge.corner_import; assert 'livef1' not in sys.modules; assert 'fastf1' not in sys.modules; assert 'bridge.calibrate' not in sys.modules"],check=True)

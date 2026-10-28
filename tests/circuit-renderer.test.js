@@ -103,3 +103,25 @@ test('calculated provisional boundaries render automatically with unequal colour
   assert.match(html,/data-layer="start-finish"/);assert.match(html,/#ed3897/);assert.match(html,/#f6ce42/);assert.match(html,/#40bff2/);
  }finally{await server.close();}
 });
+
+test('SVG sector subpaths start and end at the same arc fractions as markers',async()=>{
+ const server=await createServer({server:{middlewareMode:true},appType:'custom'});
+ try {
+  const {default:Renderer}=await server.ssrLoadModule('/src/circuits/CircuitRenderer.jsx');
+  const {emptyAnnotations}=await server.ssrLoadModule('/src/circuits/annotations.js');
+  const {pointAt,pathRange}=await server.ssrLoadModule('/src/circuits/geometry.js');
+  const geometry=createGeometry([{x:0,y:0},{x:1,y:0},{x:100,y:0},{x:100,y:100},{x:0,y:100},{x:0,y:0}]);
+  const mark=at=>({at,status:'provisional',calculated:true});
+  const data={...emptyAnnotations(austin,geometry),startFinish:mark(.996),sector1End:mark(.297),sector2End:mark(.709)};
+  const html=renderToStaticMarkup(createElement(Renderer,{geometry,circuit:austin,annotations:data}));
+  assert.match(html,/data-start="0" data-end="0.297"/);
+  const paths=[...html.matchAll(/data-sector="[123]" data-start="([^"]+)" data-end="([^"]+)" d="([^"]+)"/g)];
+  assert.equal(paths.length,4);
+  for(const [,start,end,path] of paths){
+   assert.equal(path,pathRange(geometry,Number(start),Number(end)));
+   const a=pointAt(geometry,Number(start)),b=pointAt(geometry,Number(end));
+   assert.ok(path.startsWith(`M ${a.x} ${a.y}`));assert.ok(path.endsWith(`L ${b.x} ${b.y}`));
+  }
+  assert.match(html,/data-layer="sector-boundary" data-at="0.297"/);
+ }finally{await server.close();}
+});

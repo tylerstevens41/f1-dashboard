@@ -1,5 +1,5 @@
 import AnimationDiagnostics from '../animation/AnimationDiagnostics';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import CircuitRenderer from './CircuitRenderer';
 import CalibrationLayers, { LayerControls } from './CalibrationLayers';
 import { calibrationGeometry, validateCalibration } from './calibration';
@@ -7,6 +7,8 @@ import { findCircuit } from './registry';
 import AnnotationEditor from './AnnotationEditor';
 import AppearancePanel from './AppearancePanel';
 import { defaultAppearance, emptyAnnotations, geometryId, nearestFraction, validateAnnotations, mergeImportedCorners, placeAnnotation } from './annotations';
+import {pointAt} from './geometry';
+import {boundaryDisplayAudit,calculatedBoundaryPreview,browserBoundaryAudit,downloadAudit} from './boundaryAudit';
 import './live-circuit.css';
 
 
@@ -23,6 +25,10 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
   const [preview,setPreview]=useState(false);
   const [selection,setSelection]=useState(null);
   const [placementError,setPlacementError]=useState('');
+  const [previewCalculated,setPreviewCalculated]=useState(false);
+  const [showAuditAnchors,setShowAuditAnchors]=useState(false);
+  const circuitSvg=useRef(null);
+  const [candidateSectors,setCandidateSectors]=useState(null);
   const [appearance,setAppearance]=useState(()=>{try{return {...defaultAppearance,...JSON.parse(localStorage.getItem('f1-track-appearance')||'{}')};}catch{return defaultAppearance;}});
   const [layers,setLayers]=useState({outline:true,raw:false,transformed:false,alignedSvg:false,original:false,drivers:true});
   useEffect(()=>{ if(animation && circuit) animation.configure(circuit.motion); },[animation,circuit]);
@@ -69,13 +75,20 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
     const id=geometryId(geometry);
     let base=emptyAnnotations(circuit,geometry);
     try {if(loaded?.cornerFile)base=validateAnnotations(loaded.cornerFile,circuit,geometry);} catch(err) {base.loadError=err.message;}
-    try {if(loaded?.sectorFile){const sectors=validateAnnotations(loaded.sectorFile,circuit,geometry);base=mergeImportedCorners(sectors,{...base,startFinish:base.startFinish??sectors.startFinish,sector1End:base.sector1End??sectors.sector1End,sector2End:base.sector2End??sectors.sector2End,direction:sectors.direction});}} catch(err) {base.loadError=err.message;}
+    try {if(candidateSectors||loaded?.sectorFile){const sectors=validateAnnotations(candidateSectors??loaded.sectorFile,circuit,geometry);base=mergeImportedCorners(sectors,{...base,startFinish:base.startFinish??sectors.startFinish,sector1End:base.sector1End??sectors.sector1End,sector2End:base.sector2End??sectors.sector2End,direction:sectors.direction});}} catch(err) {base.loadError=err.message;}
     try {if(loaded?.annotationFile)base=mergeImportedCorners(base,validateAnnotations(loaded.annotationFile,circuit,geometry));} catch(err) {base.loadError=err.message;}
     if(draft?.geometryId===id && draft?.circuitId===circuit.id && draft?.layoutVersion===circuit.layoutVersion)return mergeImportedCorners(base,draft);
     if(import.meta.env.DEV){try{const saved=JSON.parse(localStorage.getItem(`f1-annotations-${circuit.id}-${circuit.layoutVersion}-${id}`)||'null');if(saved)return mergeImportedCorners(base,validateAnnotations(saved,circuit,geometry));}catch{ /* incompatible drafts are never applied */ }}
     return base;
-  },[geometry,circuit,draft,loaded]);
-  const changeAnnotations=value=>{setPreview(true);setDraft(value);try{localStorage.setItem(`f1-annotations-${circuit.id}-${circuit.layoutVersion}-${value.geometryId}`,JSON.stringify(value));}catch{ /* storage optional */ }};
+  },[geometry,circuit,draft,loaded,candidateSectors]);
+  const displayAnnotations=useMemo(()=>import.meta.env.DEV && previewCalculated && annotations?calculatedBoundaryPreview(annotations):annotations,[previewCalculated,annotations]);
+  const auditRows=useMemo(()=>{
+    if(!annotations||!geometry)return [];
+    let saved=null;
+    if(import.meta.env.DEV){try{saved=JSON.parse(localStorage.getItem(`f1-annotations-${circuit.id}-${circuit.layoutVersion}-${annotations.geometryId}`)||'null');}catch{ /* optional */ }}
+    return boundaryDisplayAudit(displayAnnotations,geometry,{...loaded,sectorFile:candidateSectors??loaded?.sectorFile,calculatedOrigin:candidateSectors?'candidate-file':'calculated-file',saved,draft:previewCalculated?null:draft});
+  },[annotations,displayAnnotations,geometry,circuit,loaded,draft,previewCalculated,candidateSectors]);
+  const changeAnnotations=value=>{setPreviewCalculated(false);setPreview(true);setDraft(value);try{localStorage.setItem(`f1-annotations-${circuit.id}-${circuit.layoutVersion}-${value.geometryId}`,JSON.stringify(value));}catch{ /* storage optional */ }};
   const changeAppearance=value=>{setAppearance(value);try{localStorage.setItem('f1-track-appearance',JSON.stringify(value));}catch{ /* storage optional */ }};
   const place=event=>{
     if(!placing||!geometry||!annotations)return;
@@ -120,12 +133,27 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
     {import.meta.env.DEV && animation && <AnimationDiagnostics animation={animation}/>}
     {(placementError||annotations?.loadError) && <p role="alert" className="calibration-error">{placementError||annotations.loadError}</p>}
     {import.meta.env.DEV && annotations?.boundaryDiagnostics && <div className="calibration-debug-panel">Source calculation: provisional · {annotations.boundaryDiagnostics.validLaps} laps / {annotations.boundaryDiagnostics.drivers} drivers · {Object.values(annotations.boundaryDiagnostics.rejected??{}).reduce((a,b)=>a+b,0)} rejected · {annotations.sectorSource?.year} {annotations.sectorSource?.event} {annotations.sectorSource?.session} · FIA: {annotations.boundaryDiagnostics.fia?.status}<br/>{['startFinish','sector1End','sector2End'].map(k=><span key={k}>{k}: {annotations[k]?.at.toFixed(5)??'overridden / hidden'} · p95 {annotations[k]?.sourceEstimate?.statistics?.p95NativeDistance?.toFixed(1)??'—'} native units · {annotations[k]?.sourceEstimate?.statistics?.accepted??'—'} kept / {annotations[k]?.sourceEstimate?.statistics?.outliers??'—'} outliers; </span>)}<br/>{annotations.boundaryDiagnostics.fia?.warnings?.join(' · ')}</div>}
+    {import.meta.env.DEV && annotations && geometry && <details className="circuit-dev-panel"><summary>Boundary accuracy and display audit</summary>
+      <p>Precision is lap-to-lap spread. Accuracy remains unverified without registered independent physical timing lines. Current file warnings may use older FIA reference values; revalidate locally.</p>
+      <label>Load candidate sector JSON (memory only) <input type="file" accept=".json,application/json" onChange={async e=>{
+        try {const file=e.target.files?.[0];if(!file)return;if(file.size>16*1024*1024)throw Error('Too large');const data=validateAnnotations(JSON.parse(await file.text()),circuit,geometry);setCandidateSectors(data);setPreviewCalculated(true);setPlacementError('');}
+        catch {setPlacementError('Candidate sector file rejected: check JSON schema, circuit, layout and geometry fingerprint.');}
+      }}/></label>{candidateSectors && <button onClick={()=>{setCandidateSectors(null);setPreviewCalculated(false);}}>Stop candidate preview</button>}
+      <label><input type="checkbox" checked={previewCalculated} onChange={e=>setPreviewCalculated(e.target.checked)}/>Preview calculated boundaries only (does not save or replace overrides)</label>
+      <label><input type="checkbox" checked={showAuditAnchors} onChange={e=>setShowAuditAnchors(e.target.checked)}/>Show actual corner anchors and calculated crossings</label>
+      {auditRows.map(row=><p key={row.key}>{row.key}: calculated {row.calculatedAt?.toFixed(6)??'missing'} · displayed {row.displayedAt?.toFixed(6)??'hidden'} · {row.origin}{row.different?' · OVERRIDE DIFFERS FROM CALCULATION':''}</p>)}
+      <button onClick={()=>downloadAudit(browserBoundaryAudit(displayAnnotations,geometry,auditRows,circuitSvg.current))}>Export safe browser boundary audit</button>
+    </details>}
     {error && <p role="alert" className="calibration-error">{error}</p>}
     <div className="live-circuit-viewport">
       {geometry?<CircuitRenderer geometry={geometry} circuit={circuit} drivers={layers.drivers?markers:[]}
         selectedDriver={selectedDriver} onSelectDriver={onSelectDriver} animate animation={animation}
-        showLabels={labels} showTrack={!debug||layers.outline} annotations={annotations} appearance={appearance}
+        showLabels={labels} showTrack={!debug||layers.outline} annotations={displayAnnotations} svgRef={circuitSvg} appearance={appearance}
         annotationsCalibrated={true} previewProvisional={import.meta.env.DEV && preview} annotationSelection={selection} editingAnnotations={import.meta.env.DEV && Boolean(placing)} onClick={place}>
+        {import.meta.env.DEV && showAuditAnchors && <g pointerEvents="none" data-layer="audit-anchors">
+          {annotations.corners.map(c=>{const p=pointAt(geometry,c.at);return <g key={`${c.number}${c.letter??''}`}><circle cx={p.x} cy={p.y} r="50" fill="#ff9f43"/><text x={p.x+70} y={p.y-70} fontSize="140" fill="#ff9f43">anchor {c.number}{c.letter}</text></g>;})}
+          {auditRows.filter(r=>r.calculatedPoint).map(r=><g key={r.key}><circle cx={r.calculatedPoint.x} cy={r.calculatedPoint.y} r="110" stroke="#38ffac" fill="none" strokeWidth="25"/><text x={r.calculatedPoint.x+120} y={r.calculatedPoint.y-120} fontSize="150" fill="#38ffac">calculated {r.key}</text></g>)}
+        </g>}
         {import.meta.env.DEV && debug && <CalibrationLayers calibration={calibration} geometry={geometry} circuit={circuit} layers={layers}/>}
       </CircuitRenderer>:<p>Loading circuit geometry…</p>}
     </div>

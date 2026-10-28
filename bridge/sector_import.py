@@ -78,15 +78,17 @@ def collect_laps(session, limit=40):
             if discrepancy.max() > .002 or pd.isna(row.LapStartDate) or abs((row.LapStartDate-session.t0_date).total_seconds()-lap['start']) > .002:
                 raise ImportFailure('date-session-clock-mismatch')
             times = pos.SessionTime.dt.total_seconds().to_numpy()
-            if len(times) < 2 or np.any(np.diff(times) <= 0) or np.max(np.diff(times)) > .75:
-                raise ImportFailure('lap-gps-gap')
+            if len(times) < 2 or np.any(np.diff(times) <= 0):
+                raise ImportFailure('invalid-position-order')
+            lap['remoteGapCount']=int(np.sum(np.diff(times)>.75))
+            lap['maxPositionGapSeconds']=float(np.max(np.diff(times)))
             if np.any(np.linalg.norm(np.diff(pos[['X','Y']].to_numpy(dtype=float),axis=0),axis=1)/np.diff(times)>2000):
                 raise ImportFailure('position-spike')
             lap['positions'] = np.column_stack([times, pos.X, pos.Y]).astype(float).tolist()
             for crossing in crossing_times(lap):interpolate(lap['positions'],crossing)
-            # Feed sector SessionTime fields may include delivery delays: report,
-            # never substitute their receipt times for duration-based crossings.
-            lap['timingReceiptOffsets'] = [None if seconds(row.get(k)) is None else seconds(row.get(k))-when
+            # FastF1 may correct these update timestamps during parsing. Record
+            # differences, but do not treat them as raw receipts or exact crossings.
+            lap['sectorSessionOffsets'] = [None if seconds(row.get(k)) is None else seconds(row.get(k))-when
                 for k, when in zip(('Sector1SessionTime','Sector2SessionTime','Sector3SessionTime'), crossing_times(lap)[1:])]
             result.append(lap)
         except ImportFailure as exc:
@@ -120,11 +122,12 @@ def fia_check(result):
     """Coarse independent map checks, never force GPS fractions to FIA distances."""
     if result['circuitId'] != 'austin' or result['sectorSource']['year'] != 2026:
         return {'status': 'unavailable', 'warnings': ['No event-specific reference configured']}
+    reference=read(Path(__file__).resolve().parent.parent/'config/circuit-references/austin-2026.json')
     direction = result['direction']
     s, a, b = [result[k]['at'] for k in KEYS]
-    lengths = [((y-x)*direction) % 1*5513 for x, y in ((s,a),(a,b),(b,s))]
+    lengths = [((y-x)*direction) % 1*reference['lengthMetres'] for x, y in ((s,a),(a,b),(b,s))]
     warnings, checks = [], []
-    for i, (estimated, official) in enumerate(zip(lengths, (1914,1941,1658))):
+    for i, (estimated, official) in enumerate(zip(lengths, reference['sectorLengthsMetres'])):
         checks.append({'sector': i+1, 'geometryRatioScaledMetres': estimated, 'fiaMetres': official})
         if abs(estimated-official) > official*.10:
             warnings.append(f'Sector {i+1} racing-line ratio differs from FIA distance by over 10%')
@@ -133,7 +136,7 @@ def fia_check(result):
         if number not in corners:
             warnings.append(f'T{number} reference unavailable')
             continue
-        distance = ((corners[number]['at']-boundary)*direction) % 1*5513
+        distance = ((corners[number]['at']-boundary)*direction) % 1*reference['lengthMetres']
         checks.append({'beforeTurn': number, 'geometryRatioScaledMetres': distance, 'fiaMetres':65})
         if abs(distance-65)>100:
             warnings.append(f'Intermediate before T{number} disagrees with the FIA map')
@@ -145,7 +148,9 @@ def fia_check(result):
         warnings.append('Finish reference turns unavailable')
     return {'status': 'discrepancy' if warnings else 'coarsely-consistent-unverified', 'checks': checks, 'warnings': warnings,
             'note': 'Racing-line ratios and FastF1 visualization turns are approximate, not surveyed timing lines. Confirm the lap control line, not the separate grid start line, on the FIA map.',
-            'reference': 'https://www.fia.com/system/files/decision-document/2026_united_states_grand_prix_-_competition_notes_-_circuit_map_pit_lane_drawing_and_emergency_exits_map.pdf'}
+            'reference': reference['source'], 'referenceVersion':reference['version'],
+            'precisionIsNotAccuracy':True,
+            'contradictionNote':'If corner proximity passes but sector lengths disagree, inspect saved-versus-source anchors and rendered-versus-calculated fractions; neither check alone proves physical accuracy.', 'accuracyStatus':'unverified-no-registered-physical-lines'}
 
 
 def add_boundaries(source, result, calibration):
@@ -176,7 +181,8 @@ def add_boundaries(source, result, calibration):
             for k,f in zip(KEYS,fractions): estimates[k].append(f)
             lap_details.append({'driver':lap['driver'],'lap':lap['lap'],'fractions':fractions,
                                 'startAt':projected[0][0],'endAt':projected[3][0],
-                                'projectionErrors':[e for _,e in projected], 'bracketSeconds':[gap for _,gap in positions]})
+                                'projectionErrors':[e for _,e in projected], 'bracketSeconds':[gap for _,gap in positions],
+                                'remoteGapCount':lap.get('remoteGapCount',0), 'sectorSessionOffsets':lap.get('sectorSessionOffsets',lap.get('timingReceiptOffsets'))})
         except ImportFailure as exc: rejected[str(exc)] += 1
     if len(lap_details)<5:raise ImportFailure(f'Only {len(lap_details)} usable laps; need five. Rejected: {dict(rejected)}')
     for k, values in estimates.items():
@@ -194,6 +200,8 @@ def add_boundaries(source, result, calibration):
     result['boundaryDiagnostics'] = {'status':'provisional','analyzed':len(data['laps'])+sum(data.get('rejected',{}).values()),
         'validLaps':len(lap_details),'drivers':len({p['driver'] for p in lap_details}), 'rejected':dict(rejected),
         'estimates':lap_details,'timeBasis':data.get('timeBasis'), 'registration':result['alignment']}
+    result['boundaryDiagnostics']['precision']={k:result[k]['sourceEstimate']['statistics'] for k in KEYS}
+    result['boundaryDiagnostics']['accuracy']={'status':'unverified','reason':'Small spread and a good registration do not independently validate timing/position synchronization or physical line coordinates.'}
     result['boundaryDiagnostics']['fia'] = fia_check(result)
     return result
 
@@ -202,18 +210,36 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--year',type=int,default=2026);p.add_argument('--event',default='United States');p.add_argument('--session',default='R')
     p.add_argument('--circuit',default='austin');p.add_argument('--layout',default='austin-livef1-v1')
-    p.add_argument('--cache',default='data-cache/fastf1');p.add_argument('--source-input');p.add_argument('--source-output')
-    p.add_argument('--calibration');p.add_argument('--output')
+    p.add_argument('--cache',default='data-cache/fastf1');p.add_argument('--source-input');p.add_argument('--source-output');p.add_argument('--cache-only',action='store_true')
+    p.add_argument('--calibration');p.add_argument('--output');p.add_argument('--physical-reference');p.add_argument('--corner-annotations')
     args=p.parse_args()
     try:
         if not args.source_output and not args.output:raise ImportFailure('Specify --source-output or --output')
-        source=read(args.source_input) if args.source_input else fetch(args.year,args.event,args.session,args.cache,lap_collector=collect_laps)
+        source=read(args.source_input) if args.source_input else fetch(args.year,args.event,args.session,args.cache,lap_collector=collect_laps,cache_only=args.cache_only)
         if not args.source_input:source.update(circuitId=args.circuit,layoutVersion=args.layout)
         if args.source_output:write(args.source_output,source)
         if args.output:
             if not args.calibration or Path(args.calibration).resolve()==Path(args.output).resolve():raise ImportFailure('A separate calibration input is required')
             calibration=read(args.calibration)
-            result=add_boundaries(source,align(source,calibration,args.circuit,args.layout),calibration)
+            result=align(source,calibration,args.circuit,args.layout)
+            try:result=add_boundaries(source,result,calibration)
+            except ImportFailure as exc:
+                if not args.physical_reference:raise
+                result['sectorSource']={k:source[k] for k in ('year','event','session')}
+                result['boundaryDiagnostics']={'status':'provisional','timingFailure':str(exc)}
+            if args.physical_reference:
+                from .physical_lines import apply_physical_lines
+                result=apply_physical_lines(read(args.physical_reference),result,calibration)
+                result['boundaryDiagnostics']['fia']=fia_check(result)
+            if args.corner_annotations:
+                saved=read(args.corner_annotations)
+                if saved.get('schema')!='f1-circuit-annotations-v1' or any(saved.get(k)!=result.get(k) for k in ('circuitId','layoutVersion','geometryId')):
+                    raise ImportFailure('Saved corner annotation circuit/layout/geometry mismatch')
+                result['boundaryDiagnostics']['fia']=fia_check({**result,'corners':saved.get('corners',[])})
+                result['boundaryDiagnostics']['cornerReferenceSource']='explicit-saved-corner-annotations'
+                original={(c['number'],c.get('letter','')):c['at'] for c in result['corners']}
+                result['boundaryDiagnostics']['cornerReferenceDifferences']=[{'number':c['number'],'letter':c.get('letter',''),
+                    'savedAt':c['at'],'sourceAt':original.get((c['number'],c.get('letter','')))} for c in saved.get('corners',[])]
             # Dedicated boundary file never replaces the user's imported corners.
             result['corners']=[]
             write(args.output,result)

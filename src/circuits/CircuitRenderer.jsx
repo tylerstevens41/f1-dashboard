@@ -1,5 +1,5 @@
 import BufferedDriverMarker from "./BufferedDriverMarker";
-import { pointAt } from "./geometry";
+import { pointAt, pathRange } from "./geometry";
 import { bases, defaultAppearance, palette, sectorRanges, cornerKey } from "./annotations";
 
 function Segment({ geometry, start, end, color, width = 200 }) {
@@ -36,7 +36,7 @@ export default function CircuitRenderer({ geometry, circuit, drivers = [], selec
       {appearance.drs && (features.zones??[]).filter(showFeature).map(zone=><Segment key={zone.id} geometry={geometry} {...zone} color="#1dd58a" width={appearance.trackWidth+140}/>)}
       <path d={geometry.path} fill="none" stroke="#858d9b" strokeWidth={appearance.trackWidth+40} strokeLinecap="round" strokeLinejoin="round" />
       <path d={geometry.path} fill="none" stroke={bases[appearance.base]??bases.charcoal} strokeWidth={appearance.trackWidth} strokeLinecap="round" strokeLinejoin="round" />
-      {sectors ? sectors.flatMap((ranges,index)=>ranges.map(([a,b],i)=><path key={`${index}-${i}`} data-sector={index+1} d={geometry.path} pathLength="1" fill="none" stroke={palette[index]} strokeWidth={appearance.lineWidth} strokeLinecap="butt" strokeLinejoin="round" strokeDasharray={`${b-a} ${1-(b-a)}`} strokeDashoffset={-a}/>)) : <path d={geometry.path} fill="none" stroke="#c6ccd5" strokeWidth={appearance.lineWidth} strokeLinecap="round" strokeLinejoin="round"/>}
+      {sectors ? sectors.flatMap((ranges,index)=>ranges.map(([a,b],i)=><path key={`${index}-${i}`} data-sector={index+1} data-start={a} data-end={b} d={pathRange(geometry,a,b)} fill="none" stroke={palette[index]} strokeWidth={appearance.lineWidth} strokeLinecap="butt" strokeLinejoin="round"/>)) : <path d={geometry.path} fill="none" stroke="#c6ccd5" strokeWidth={appearance.lineWidth} strokeLinecap="round" strokeLinejoin="round"/>}
     </g>}
     {appearance.pitLane && features.pitLane?.path && showFeature(features.pitLane) && <path data-layer="pit-lane" d={features.pitLane.path} fill="none" stroke="#999" strokeWidth="75"/>}
     {appearance.drs && (features.detectionPoints??[]).filter(showFeature).map((f,i)=>{const p=pointAt(geometry,f.at);return <circle data-layer="detection" key={i} cx={p.x} cy={p.y} r="60" fill="#1dd58a"/>;})}
@@ -49,8 +49,8 @@ export default function CircuitRenderer({ geometry, circuit, drivers = [], selec
         <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize={145*scale*Math.min(1,3/label.length)} fill="white">{label}</text>
       </g>;
     })}
-    {appearance.boundaries && (modern?[features.sector1End,features.sector2End]:features.sectors??[]).filter(showFeature).map((f,i)=>{const p=pointAt(geometry,f.at);return <g data-layer="sector-boundary" key={i} transform={`translate(${p.x} ${p.y}) rotate(${p.angle})`}><line y1="-210" y2="210" stroke="white" strokeWidth="30"/><text x="230" y="-230" transform={`rotate(${-p.angle})`} fill="white" fontSize="160">{f.label??`S${i+1}`}</text></g>;})}
-    {appearance.startFinish && showFeature(features.startFinish) && (()=>{const p=pointAt(geometry,features.startFinish.at);return <g data-layer="start-finish" transform={`translate(${p.x} ${p.y}) rotate(${p.angle})`}><line y1="-230" y2="230" stroke="white" strokeWidth="75"/><line y1="-230" y2="230" stroke="#10141c" strokeWidth="35" strokeDasharray="55 55"/></g>;})()}
+    {appearance.boundaries && (modern?[features.sector1End,features.sector2End]:features.sectors??[]).filter(showFeature).map((f,i)=>{const p=pointAt(geometry,f.at);return <g data-layer="sector-boundary" data-at={f.at} key={i} transform={`translate(${p.x} ${p.y}) rotate(${p.angle})`}><line y1="-210" y2="210" stroke="white" strokeWidth="30"/><text x="230" y="-230" transform={`rotate(${-p.angle})`} fill="white" fontSize="160">{f.label??`S${i+1}`}</text></g>;})}
+    {appearance.startFinish && showFeature(features.startFinish) && (()=>{const p=pointAt(geometry,features.startFinish.at);return <g data-layer="start-finish" data-at={features.startFinish.at} transform={`translate(${p.x} ${p.y}) rotate(${p.angle})`}><line y1="-230" y2="230" stroke="white" strokeWidth="75"/><line y1="-230" y2="230" stroke="#10141c" strokeWidth="35" strokeDasharray="55 55"/></g>;})()}
     {previewProvisional && annotationSelection && (()=>{
       const f=annotationSelection.kind==='corner'?features.corners?.find(c=>cornerKey(c)===cornerKey(annotationSelection)):features[annotationSelection.kind];
       if(!f)return null;const p=pointAt(geometry,f.at);

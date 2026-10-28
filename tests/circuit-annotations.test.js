@@ -66,3 +66,19 @@ test('calculated boundaries load without replacing reviewed positions, corners, 
  const cleared=mergeImportedCorners(base,{sector1End:null,boundaryOverrides:{sector1End:true}});
  assert.equal(cleared.sector1End,null);
 });
+
+test('reported Austin fractions can differ from displayed manual estimates; preview is nondestructive',async()=>{
+ const {boundaryDisplayAudit,calculatedBoundaryPreview}=await import('../src/circuits/boundaryAudit.js');
+ const {mergeImportedCorners}=await import('../src/circuits/annotations.js');
+ const mark=at=>({at,status:'provisional',calculated:true,sourceEstimate:{at}});
+ const source={...emptyAnnotations(circuit,geometry),startFinish:mark(.9962572732649239),sector1End:mark(.29711217736772716),sector2End:mark(.708877719002983)};
+ // This reproduces a possible older FIA-estimate override, not an assertion
+ // that the user's browser contains these particular values.
+ const manual={sector1End:{at:(source.startFinish.at+1914/5513)%1,status:'provisional'}};
+ const effective=mergeImportedCorners(source,manual);
+ const audit=boundaryDisplayAudit(effective,geometry,{sectorFile:source,annotationFile:manual});
+ const s1=audit.find(r=>r.key==='sector1End');assert.equal(s1.origin,'manual-file');assert.equal(s1.different,true);
+ assert.equal(s1.calculatedAt,source.sector1End.at);assert.equal(s1.displayedAt,manual.sector1End.at);
+ const preview=calculatedBoundaryPreview(effective);
+ assert.equal(preview.sector1End.at,source.sector1End.at);assert.equal(effective.sector1End.at,manual.sector1End.at);
+});

@@ -1,3 +1,4 @@
+import austinReference from '../../config/circuit-references/austin-2026.json';
 import { useState } from 'react';
 import { emptyAnnotations, validateAnnotations, cornerKey } from './annotations';
 
@@ -24,7 +25,7 @@ export default function AnnotationEditor({circuit,geometry,value,onChange,placin
     {selected && <><label>Offset X <input type="number" value={selected.offset?.x??0} onChange={e=>update({offset:{...selected.offset,x:Number(e.target.value)}})}/></label><label> Offset Y <input type="number" value={selected.offset?.y??-245} onChange={e=>update({offset:{...selected.offset,y:Number(e.target.value)}})}/></label>{' '}
     {kind==='corner' && <button onClick={()=>update({hidden:!selected.hidden})}>{selected.hidden?'Show label':'Hide label'}</button>}<button onClick={()=>kind==='corner'?update({hidden:true}):onChange({...value,boundaryOverrides:{...value.boundaryOverrides,[kind]:true},[kind]:null})}>Delete</button></>}
     <p>Provenance: <input value={value.provenance} onChange={e=>onChange({...value,provenance:e.target.value})} placeholder="Evidence / local verification"/> <button disabled={!selected||!value.provenance.trim()} onClick={()=>update({status:selected.status==='verified'?'provisional':'verified'})}>Toggle verified</button></p>
-    {circuit.id==='austin' && <p>2026 FIA map: S1 1.914 km, S2 1.941 km, S3 1.658 km; S1 is 65 m before T7, S2 65 m before T13. <button disabled={!value.startFinish} onClick={()=>{const s=value.startFinish.at,d=value.direction,wrap=x=>(x%1+1)%1;onChange({...value,sector1End:{at:wrap(s+d*1.914/5.513),status:'provisional'},sector2End:{at:wrap(s+d*3.855/5.513),status:'provisional'}});}}>Estimate from FIA distances</button></p>}
+    {circuit.id==='austin' && <p>2026 FIA map: S1 1.658 km, S2 1.941 km, S3 1.914 km; S1 is 65 m before T7, S2 65 m before T13. <button disabled={!value.startFinish} onClick={()=>{const s=value.startFinish.at,d=value.direction,wrap=x=>(x%1+1)%1;onChange({...value,sector1End:{at:wrap(s+d*austinReference.sectorLengthsMetres[0]/austinReference.lengthMetres),status:'provisional'},sector2End:{at:wrap(s+d*(austinReference.sectorLengthsMetres[0]+austinReference.sectorLengthsMetres[1])/austinReference.lengthMetres),status:'provisional'}});}}>Estimate from FIA distances</button></p>}
     <button onClick={exportJson}>Export JSON</button>{' '}<button onClick={()=>onChange({...emptyAnnotations(circuit,geometry),boundaryOverrides:{startFinish:true,sector1End:true,sector2End:true},corners:value.corners.filter(c=>c.imported).map(c=>({...c,hidden:true,manualOverride:true}))})}>Clear annotations</button> {error && <span role="alert">{error}</span>}
   </details>;
 }

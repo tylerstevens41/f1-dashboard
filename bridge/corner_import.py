@@ -52,7 +52,7 @@ def write(path, value):
     path.write_text(json.dumps(value, indent=2, allow_nan=False), encoding='utf-8')
 
 
-def fetch(year, event, session_name, cache, lap_collector=None):
+def fetch(year, event, session_name, cache, lap_collector=None, cache_only=False):
     import fastf1
     cache = Path(cache)
     cache.mkdir(parents=True, exist_ok=True)
@@ -71,6 +71,7 @@ def fetch(year, event, session_name, cache, lap_collector=None):
             total -= size
     prune()
     fastf1.Cache.enable_cache(str(cache))
+    fastf1.Cache.offline_mode(cache_only)
     try:
         session = fastf1.get_session(year, event, session_name)
         session.load(telemetry=True, weather=False, messages=False)
@@ -236,6 +237,7 @@ def main():
     p.add_argument('--source-output')
     p.add_argument('--calibration')
     p.add_argument('--output')
+    p.add_argument('--cache-only',action='store_true',help='Use FastF1 offline mode; do not fetch missing HTTP data')
     p.add_argument('--with-sectors',action='store_true',help='Also calculate start/finish and sectors from multi-lap timing/GPS')
     args = p.parse_args()
     try:
@@ -245,7 +247,7 @@ def main():
         if args.with_sectors:
             from .sector_import import collect_laps, add_boundaries
             collector=collect_laps
-        source = read(args.source_input) if args.source_input else fetch(args.year, args.event, args.session, args.cache, lap_collector=collector)
+        source = read(args.source_input) if args.source_input else fetch(args.year, args.event, args.session, args.cache, lap_collector=collector, cache_only=args.cache_only)
         if not args.source_input:
             source.update(circuitId=args.circuit, layoutVersion=args.layout)
         if args.source_output:

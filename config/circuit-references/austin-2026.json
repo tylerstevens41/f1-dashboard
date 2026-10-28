@@ -1,0 +1,13 @@
+{
+  "schema": "circuit-physical-reference-v1",
+  "circuitId": "austin",
+  "season": 2026,
+  "version": "fia-document-7-map-v1-2026-10-22-layout-reviewed",
+  "source": "https://www.fia.com/system/files/decision-document/2026_united_states_grand_prix_-_competition_notes_-_circuit_map_pit_lane_drawing_and_emergency_exits_map.pdf",
+  "page": 2,
+  "lengthMetres": 5513,
+  "sectorLengthsMetres": [1658, 1941, 1914],
+  "intermediates": [{"key": "sector1End", "beforeTurn": 7, "distanceMetres": 65}, {"key": "sector2End", "beforeTurn": 13, "distanceMetres": 65}],
+  "timingLineCoordinates": null,
+  "note": "Read the visual rows, not PDF extraction order: S1=1.658, S2=1.941, S3=1.914 km. The map gives no registered LiveF1 timing-line coordinates. Corner offsets and geometry-length ratios are coarse checks, not independent geospatial verification."
+}

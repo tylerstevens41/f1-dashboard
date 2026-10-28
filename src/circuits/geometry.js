@@ -41,3 +41,11 @@ export function pointAt(geometry, fraction) {
   const t = span ? (distance - geometry.lengths[i-1]) / span : 0;
   return { x: a.x + (b.x-a.x)*t, y: a.y + (b.y-a.y)*t, angle: Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI };
 }
+
+// Explicit polyline subpaths share pointAt's cumulative-distance convention.
+// This avoids relying on SVG dash phase to locate physical timing boundaries.
+export function pathRange(geometry, start, end) {
+  const a=pointAt(geometry,start),b=pointAt(geometry,end);
+  const points=[a,...geometry.points.filter((_,i)=>geometry.lengths[i]>start*geometry.total && geometry.lengths[i]<end*geometry.total),b];
+  return points.map((p,i)=>`${i?'L':'M'} ${p.x} ${p.y}`).join(' ');
+}

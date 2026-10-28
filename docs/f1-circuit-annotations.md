@@ -2,7 +2,7 @@
 
 The renderer uses the same calibrated geometry and animated driver components as PR #4. An annotation file stores fractions of the geometry path's arc length. `startFinish`, `sector1End` and `sector2End` identify three independent points; `direction` says whether racing follows increasing or decreasing geometry distance. The origin is never assumed to be the start line. Wrapped segments are split at the geometry origin. Invalid or missing sectors use a neutral centre line, never equal thirds. Annotations are keyed to circuit ID, layout version and a fingerprint of the projected geometry; changing your calibration invalidates old placements. A closed path is required for lap annotations. Fractions derived from racing-line distance are not automatically FIA surveyed centreline distances.
 
-The 2026 FIA United States GP competition map (document 7, 22 October 2026) identifies Austin's 20 corners, intermediate S1 65 m before T7, S2 65 m before T13, and sector lengths S1 1.914 km, S2 1.941 km and S3 1.658 km, for a 5.513 km circuit. Source: https://www.fia.com/system/files/decision-document/2026_united_states_grand_prix_-_competition_notes_-_circuit_map_pit_lane_drawing_and_emergency_exits_map.pdf . These are event-specific reference values, not verified coordinates in your GPS calibration. No turns or sector positions have been committed as verified. Telemetry timing message receipt is not an exact crossing timestamp.
+The 2026 FIA United States GP competition map (document 7, 22 October 2026) identifies Austin's 20 corners, intermediate S1 65 m before T7, S2 65 m before T13, and sector lengths S1 1.658 km, S2 1.941 km and S3 1.914 km, for a 5.513 km circuit. Source: https://www.fia.com/system/files/decision-document/2026_united_states_grand_prix_-_competition_notes_-_circuit_map_pit_lane_drawing_and_emergency_exits_map.pdf . These are event-specific reference values, not verified coordinates in your GPS calibration. No turns or sector positions have been committed as verified. Telemetry timing message receipt is not an exact crossing timestamp.
 
 In development, open **Track appearance** and **Annotation editor**, then enable **Preview provisional annotations**. Choose start/finish and click the real calibrated track; choose the correct direction by comparing known turns and car movement. The optional FIA distance button estimates both boundaries relative to that start and direction. The estimate assumes proportional geometry distance and is explicitly provisional: use the FIA map, real GPS and independent checks to place/correct S1 and S2. The path fraction and distance in the editor describe the local geometry, not necessarily metres. The 20 corner numbers can be placed individually with the turn selector; adjust offsets to avoid overlap. The editor never assigns verified status on placement. Record evidence in provenance before manually changing an annotation's status to verified. Export validates sector order, layout, geometry and status. Browser-local drafts and appearance settings are stored locally; changing appearance does not change GPS data.
 
@@ -125,7 +125,7 @@ Run `bridge.sector_import` in `.venv-fastf1` to generate **all three** boundarie
 
 FastF1 3.9.0's `Telemetry` docstring and `Session._load_telemetry` source distinguish `SessionTime` (session elapsed time), `Date` (sample timestamp), and `Time` (can be slice-relative). Lap `LapStartTime` and lap-ending `Time` are session times. The collector uses the full original driver position stream, not merged car/position telemetry, and validates `Date - session.t0_date == SessionTime` and `LapStartDate - t0_date == LapStartTime` within 2 ms. This checks time-base consistency, not independent proof that feed clocks have zero systematic bias. Original `Source=pos` and `Status=OnTrack` samples are required.
 
-Each lap must be accurate, completed, non-pit, non-generated, non-deleted and green/yellow. Sector durations must sum to LapTime within 3 ms; end-start must agree within 50 ms. Crossings use start, start+S1, start+S1+S2, and measured lap end. Each position is linearly interpolated between surrounding original GPS timestamps, with a maximum 500 ms bracket. Whole-lap GPS gaps over 750 ms, missing dates, invalid coordinates and extreme spikes are rejected. Sector receipt SessionTimes are recorded as offset diagnostics, never used as physical crossing timestamps. The first 40 eligible laps are collected in lap-number/driver order, sampling multiple drivers when available.
+Each lap must be accurate, completed, non-pit, non-generated, non-deleted and green/yellow. Sector durations must sum to LapTime within 3 ms; end-start must agree within 50 ms. Crossings use start, start+S1, start+S1+S2, and measured lap end. Each position is linearly interpolated between surrounding original GPS timestamps, with a maximum 500 ms bracket. Gaps over 750 ms away from crossings are counted rather than rejecting the lap; a crossing bracket over 500 ms is still rejected. Missing dates, invalid coordinates and extreme spikes remain rejected. Parsed/corrected sector SessionTimes are recorded as offset diagnostics and are not assumed to be exact crossing timestamps. The first 40 eligible laps are collected in lap-number/driver order, sampling multiple drivers when available.
 
 The shared registration transforms crossings into the existing LiveF1 native geometry, then the path projection checks distance and competing nearby branches. Start and end estimates must agree within 0.5% of a lap; they form one circular estimate per lap. At least five distinct valid laps are required. Circular medoid/unwrapping, median and MAD-based rejection prevent estimates across path fraction 1/0 from averaging toward 0.5. P95 residual spread over 0.5% of a lap causes failure. Results retain fractions, accepted/outlier counts, native-distance spread, driver count, rejected-lap reasons, per-lap start/end estimates, GPS bracket durations, projection errors, registration RMS/p95, season and session.
 
@@ -161,3 +161,67 @@ Load the same Austin TEST race around offset 5600. The dashboard loads `austin-s
 The 1.65× corner label size is unchanged. **Corner label spacing** defaults to 1.15× and multiplies each existing offset vector only at render time, including manually adjusted vectors; it never rewrites stored offsets or anchors. Viewport padding accounts for the larger spacing; connector lines remain absent.
 
 Validate start/finish against the map's timing control line; confirm direction and S1 approximately 65 m before T7 / S2 approximately 65 m before T13. Inspect the source-calculation panel, per-boundary spread, original versus manual fractions, rejected reasons and FIA discrepancy warnings in the exported diagnostics. A numerically coherent result can still have systematic telemetry timing bias; do not mark it verified solely because it renders cleanly. No real Austin boundary calculation has been verified by the implementer without the local authenticated source and calibration.
+
+## Incorrect sector investigation and correction workflow
+
+The supplied screenshot and actual 38-lap diagnostics are different evidence layers. Their median fractions are finish 0.9962572733, S1 0.2971121774 and S2 0.7088777190; these are observations, **not certified correct positions**. The registration residuals (RMS 24.19, p95 40.36 native units, extent 20924) and tight inter-lap clusters show precision. They do not establish physical timing accuracy.
+
+A confirmed reference bug was found by rendering page 2 of FIA document 7 and extracting text with layout preserved: **S1=1658 m, S2=1941 m, S3=1914 m**. Prior code and documentation had S1/S3 reversed. The corrected source is `config/circuit-references/austin-2026.json`, with URL, page and version. For the reported observations, S1's 1658.61 m equivalent now matches the actual S1 length; S2/S3 remain discrepant. The 10% threshold is unchanged. A 330 m discrepancy must not simply be dismissed as racing-line variation. The map also says intermediates are 65 m before T7/T13; it provides no georeferenced LiveF1 line endpoints. Those corner checks use approximate FastF1 map markers, not surveyed coordinates. The audit now compares the **saved corner file** against corners independently reprojected from the sector source: this can expose a different set of anchors being used for validation and display.
+
+A second confirmed code issue was that source-calculation diagnostics could be shown beside different effective boundaries retained from a manual file or browser draft. Whether that accounts for this screenshot requires the local/browser audit; it is not proven by the screenshot alone. The development **Boundary accuracy and display audit** now lists calculated fraction, displayed fraction, and winner/origin for each boundary. **Preview calculated boundaries only** temporarily ignores overrides without saving anything. **Show actual corner anchors and calculated crossings** draws small development-only anchor markers so circular-label offsets cannot be mistaken for timing locations. Normal labels and offsets are unchanged. **Use calculated position** remains an explicit choice and retains the previous override. New explicit SVG subpaths begin/end at the same cumulative-distance points as the markers, removing any dependency on dash phase for sector transitions. Python-to-JavaScript tests cover nonuniform point spacing, the reported 0.996/0.297/0.709 inputs and wraparound.
+
+### Timing findings
+
+FastF1's pinned 3.9.0 implementation was inspected: `_api._laps_data_driver` initially records sector update SessionTimes and then applies lowest-latency lap/sector corrections. `_api._align_laps` can align drivers from reported gaps. Therefore Sector1SessionTime/Sector2SessionTime are **parsed and possibly corrected values**, not necessarily untouched receipt timestamps or independently exact GPS crossings. `LapStartTime`/lap-end `Time` use processed lap timing; LapStartDate and position SessionTime are related through `t0_date`. Date/session equality is a time-base identity, not proof that the timing and position feeds have zero systematic bias. Duration-based crossings remain the primary estimates; no arbitrary time correction was introduced. Existing cached `timingReceiptOffsets` are accepted as legacy diagnostic fields; new collections name them `sectorSessionOffsets`. The shareable audit reports aggregate offsets but does not turn them into corrections.
+
+### Revalidate using existing normalized cache — no download
+
+```powershell
+git switch feat/f1-circuit-annotations
+git pull --ff-only origin feat/f1-circuit-annotations
+.\.venv-fastf1\Scripts\Activate.ps1
+python -m bridge.sector_import --source-input data-cache/austin-fastf1-boundaries-2026.json --calibration public/circuits/austin-calibration.json --corner-annotations public/circuits/austin-corners.json --output public/circuits/austin-sectors-candidate.json
+python -m bridge.boundary_audit --calibration public/circuits/austin-calibration.json --corners public/circuits/austin-corners.json --sectors public/circuits/austin-sectors.json --source data-cache/austin-fastf1-boundaries-2026.json --output data-cache/austin-boundary-audit.json
+```
+
+If a manual annotation file exists, append `--annotations public/circuits/austin-annotations.json` to the audit command. Outputs must be new paths. Neither command overwrites calibration, corners, sectors or reviewed files. The audit exports only selected geometry/annotation numbers and aggregate timing statistics, not tokens, accounts, raw UTC or recordings. It compares old/new FIA validation, stored fractions, saved corner anchors and source-reprojected anchors. Precision and accuracy are distinct report fields.
+
+Start the existing bridge and Vite as above. In **Boundary accuracy and display audit**:
+
+1. Compare calculated and displayed fractions before changing anything.
+2. Toggle calculation-only preview and actual anchor markers.
+3. Use **Load candidate sector JSON (memory only)** to inspect `austin-sectors-candidate.json` without replacing any file. This preview is not persisted.
+4. Export **safe browser boundary audit**. It includes active fractions and actual SVG subpath endpoint coordinates measured by the browser, but no raw GPS stream.
+
+Compare browser output with Python's independently computed points:
+
+```powershell
+python -m bridge.boundary_audit --calibration public/circuits/austin-calibration.json --corners public/circuits/austin-corners.json --sectors public/circuits/austin-sectors-candidate.json --source data-cache/austin-fastf1-boundaries-2026.json --browser-audit "$env:USERPROFILE\Downloads\f1-boundary-browser-audit.json" --output data-cache/austin-boundary-comparison.json
+```
+
+Share the two audit JSONs if needed; they omit credentials, source samples and account data. Check which fraction is really rendered, source-versus-saved corner differences, and rendered endpoint errors. If calculation-only preview is right, deliberately adopt the calculated positions via the editor, or install the reviewed candidate as the defaults. Preserve backups and manual annotations. If preview remains wrong, do not drag until it looks plausible or claim the warning is solved: investigate the independent physical reference and feed synchronization.
+
+### Recover laps rejected only for remote GPS gaps
+
+The old normalized cache retains only accepted laps. It cannot recover the 959 discarded laps because their samples were not exported. The new collector permits gaps away from crossings, records their count/max duration, and retains the original strict 500 ms crossing bracket, finite-coordinate/date checks and spike veto. A missing chunk far from every crossing no longer invalidates otherwise sound estimates. Tests show a remote 3-second gap can pass while a 2-second gap at S1 still fails.
+
+If desired, re-read the existing FastF1 raw cache in the library's offline mode, without requiring another session download:
+
+```powershell
+python -m bridge.sector_import --year 2026 --event "United States" --session R --cache data-cache/fastf1 --cache-only --source-output data-cache/austin-fastf1-boundaries-local-quality.json
+python -m bridge.sector_import --source-input data-cache/austin-fastf1-boundaries-local-quality.json --calibration public/circuits/austin-calibration.json --output public/circuits/austin-sectors-local-quality-candidate.json
+```
+
+If the raw cache is incomplete, offline mode fails rather than silently fetching missing data. Your existing 38-lap normalized cache remains usable for auditing/recalculation.
+
+### Optional independent physical timing-line reference
+
+When reliable native coordinates can be established from an independently registered official map or surveyed timing-line data, the generic importer supports `--physical-reference`. There are **no invented Austin coordinates** supplied. The JSON schema `circuit-physical-timing-lines-v1` requires matching circuit, layout, geometry fingerprint, season, source/version provenance, and `lines` for `startFinish`, `sector1End`, `sector2End`. Each line must have two native coordinate endpoints `a: [x,y]`, `b: [x,y]` and positive `uncertaintyNative` for its registration. Register the official source independently; do not derive those endpoints by moving our current timing estimate or guessing from sector-length ratios.
+
+The algorithm intersects each physical timing line with the calibrated path, requires exactly one unambiguous intersection and correct driving order, and retains the original timing estimate for comparison. Use:
+
+```powershell
+python -m bridge.sector_import --source-input data-cache/austin-fastf1-boundaries-2026.json --calibration public/circuits/austin-calibration.json --physical-reference data-cache/austin-physical-lines-reviewed.json --output public/circuits/austin-sectors-physical-candidate.json
+```
+
+This is an explicit reference-based alternative, not a time-offset fit. Outputs still remain provisional: a user-supplied reference does not automatically prove its own registration. `bridge.boundary_audit` accepts the same option for independent error measurement without changing annotations. Real Austin accuracy remains unverified until the local files/browser chain and reliable physical line evidence agree.

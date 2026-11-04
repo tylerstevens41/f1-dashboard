@@ -37,7 +37,7 @@ def bundle():
 
 def annotation(b):
     return {'schema':'f1-circuit-annotations-v1','circuitId':b['identity']['id'],'layoutVersion':b['identity']['layoutVersion'],
-            'geometryId':b['geometryId'],'direction':1,'corners':[{'number':1,'at':.1,'status':'provisional'}], 'startFinish':{'at':.99,'status':'provisional'},'sector1End':{'at':.2,'status':'provisional'},'sector2End':{'at':.75,'status':'provisional'}}
+            'geometryId':b['geometryId'],'direction':1,'alignment':{'status':'provisional','method':'synthetic test fixture'},'boundaryDiagnostics':{'validLaps':5},'corners':[{'number':1,'at':.1,'status':'provisional'}], 'startFinish':{'at':.99,'status':'provisional','calculated':True},'sector1End':{'at':.2,'status':'provisional','calculated':True},'sector2End':{'at':.75,'status':'provisional','calculated':True}}
 
 
 class PreparationTests(unittest.TestCase):
@@ -198,3 +198,17 @@ class PreparationBridgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(sent[0]['type'],'circuit-assets');self.assertEqual(sent[-1]['job']['state'],'ready')
             await bridge.command(None,{'action':'circuit-prepare','year':2026,'path':session()['path']})
             self.assertIn('--allow-prepare',sent[-1]['job']['error'])
+
+class AnnotationCompletionTests(unittest.TestCase):
+    def test_complete_requires_imported_corners_and_all_three_timing_calculations(self):
+        from bridge.preparation import annotations_complete
+        b=bundle();self.assertFalse(annotations_complete(b))
+        b['corners']=annotation(b);self.assertFalse(annotations_complete(b))
+        b['sectors']=annotation(b);self.assertTrue(annotations_complete(b))
+        for field in ('startFinish','sector1End','sector2End'):
+            invalid=copy.deepcopy(b);invalid['sectors'][field]['calculated']=False
+            self.assertFalse(annotations_complete(invalid))
+        invalid=copy.deepcopy(b);invalid['sectors']['boundaryDiagnostics']['validLaps']=4
+        self.assertFalse(annotations_complete(invalid))
+        invalid['complete']=True
+        with self.assertRaises(PreparationError):validate_bundle(invalid)

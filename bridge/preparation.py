@@ -115,8 +115,8 @@ def validate_bundle(bundle, expected=None):
             start,a,b = [v['at'] for v in values]
             if not 0 < (a-start)%1 < (b-start)%1 < 1:
                 raise PreparationError('Invalid boundary lap order')
-    if bundle.get('complete') and (not (bundle.get('corners') or {}).get('corners') or not all((bundle.get('sectors') or {}).get(k) for k in ('startFinish','sector1End','sector2End'))):
-        raise PreparationError('Complete asset is missing required annotations')
+    if bundle.get('complete') and not annotations_complete(bundle):
+        raise PreparationError('Complete asset requires imported corners and successful multi-lap timing boundaries')
     return bundle
 
 
@@ -147,6 +147,17 @@ def process_alive(pid):
         return False
     except OSError:
         return True
+
+
+def annotations_complete(bundle):
+    """Completion is successful shared import/calculation, never verification."""
+    corners=bundle.get('corners') or {}
+    sectors=bundle.get('sectors') or {}
+    valid_laps=(sectors.get('boundaryDiagnostics') or {}).get('validLaps',0)
+    return bool(corners.get('corners') and corners.get('alignment') and
+                isinstance(valid_laps,int) and not isinstance(valid_laps,bool) and valid_laps>=5 and
+                all(isinstance(sectors.get(key),dict) and sectors[key].get('calculated') is True
+                    for key in ('startFinish','sector1End','sector2End')))
 
 
 class AssetStore:
@@ -466,7 +477,7 @@ def prepare(session, store=None, report=lambda **_: None, retry=True, windows=(5
         if sectors is not None and bundle.get('sectors') is None:
             bundle['sectors'] = sectors
         bundle['warnings'] = warnings
-        bundle['complete'] = bool(bundle['corners'] and bundle['sectors'])
+        bundle['complete'] = annotations_complete(bundle)
         store.publish(bundle)
         progress(stage='ready', state='ready', complete=bundle['complete'], warnings=warnings)
         return bundle

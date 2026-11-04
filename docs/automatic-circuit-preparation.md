@@ -256,3 +256,48 @@ Get-Content .\circuit-assets\circuit-65-2026\geometry-diagnostics.json -Raw
 ```
 
 Do not delete the cached sample file or lower the zero-coordinate/lap requirements. A successful synthetic regression now reproduces the zero/missing-lap window followed by a later candidate and normal geometry build, but real Mexico discovery and final alignment remain locally unverified.
+
+## Exact Austin methodology and styling: shared implementation contract
+
+Automatic preparation is an orchestration layer around the **same functions**, not a second importer or sector algorithm:
+
+| Task | Shared implementation used by Austin tools and automatic preparation |
+| --- | --- |
+| Retrieve circuit information and reference telemetry | `bridge.corner_import.fetch` (FastF1 `get_session`, `get_circuit_info`) |
+| Normalize numbered/suffixed corners | `bridge.corner_import.normalize` |
+| Register coordinates, project corner anchors and label directions | `bridge.corner_import.align` and its existing registration/projection helpers |
+| Retrieve multi-lap timing/position source | `bridge.sector_import.collect_laps` |
+| Calculate start/finish, S1 and S2 | `bridge.sector_import.add_boundaries` and its existing crossing interpolation, circular aggregation, rejection/order and accuracy checks |
+| Choose calculated boundaries versus explicit manual overrides | `src/circuits/annotations.js` source-resolution functions |
+| Draw sectors, boundaries and corners | `src/circuits/CircuitRenderer.jsx`, through `LiveCircuitSvg.jsx` |
+
+The worker imports the exact function objects above. Circuit identity, season, source telemetry, calibration and official reference data are inputs. There is no Mexico sector/corner calculation, evenly spaced production fallback or replacement geometry. The original FastF1 source fields remain cached on the backend; exported annotations retain provenance and provisional status.
+
+Appearance remains the shared Austin defaults: sector magenta `#ed3897`, yellow `#f6ce42`, cyan `#40bff2`, corner circles/text at 1.65×, label offset spacing at 1.15×, no normal connector lines, the same fonts/inherited CSS and visibility controls. Existing appearance preferences and manual boundary/label overrides still apply; the importer does not reset them.
+
+The only circuit-specific validation branch found was FIA reference lookup and reference turn numbers. Reference selection is now generic by circuit/season; the Austin JSON explicitly supplies its intermediate and finish reference turns. Austin's pre-refactor check/warning output was captured and regression-checked. No Mexico official references or physical coordinates were invented. Reference checks report warnings; they do not move timing-derived boundaries or make positions verified.
+
+Completion now explicitly requires nonempty imported corners with registration metadata **and** all three calculated timing boundaries with the shared calculation's minimum valid-lap evidence. Corners-only, sector failure, timeout, missing boundaries or manually supplied noncalculated boundaries cannot mark a circuit complete. Completeness is still separate from physical verification.
+
+Regression tests assert worker/shared-function object identity, direct-tool versus worker numerical parity for both circuit identities, the unchanged Austin reference output, and identical SVG output/default source precedence with identical synthetic inputs. The fixtures are synthetic and do not validate real Mexico annotations or claim its corner count.
+
+### Current real Mexico evidence and next local checks
+
+The supplied local log confirms geometry at source offset **96138 seconds** passed automatic checks using **103 complete laps / 22 drivers**. This is real local geometry-preparation evidence, not an assistant visual check. Corners/sectors remain incomplete: the annotation stage lasted approximately 600 seconds, consistent with the configured timeout, but the final warning text was cut off in the attachment. Inspect the saved warning rather than assume the failure cause:
+
+```powershell
+$job = Get-Content .\circuit-assets\circuit-65-2026\job.json -Raw | ConvertFrom-Json
+$job | Select-Object state, complete
+$job.warnings
+```
+
+Pull and retry the missing annotation stages while retaining the accepted geometry:
+
+```powershell
+git pull --ff-only origin feat/automatic-circuit-preparation
+.\.venv\Scripts\python.exe -m bridge.preparation --year 2026 --event Mexico --session Race --windows 96138 --login
+```
+
+Existing geometry is reused; it is not rebuilt or overwritten by annotation retries. The `.venv-fastf1` worker runs the same FastF1 importer used for Austin. Do not combine requirements files or delete the accepted geometry. If FastF1 retrieval still fails/times out, provide the saved warning. Do not mark annotations complete or verified to bypass that failure.
+
+To view the accepted geometry and shared live/test rendering, start the backend/Vite as above, select Mexico Race and load a TEST clip at offset **96138**, duration **480**. Corners/sector colours appear automatically when those actual imports succeed. Until then, missing annotations remain absent rather than invented.

@@ -58,3 +58,34 @@ test('preparation diagnostics show exception stages and lap counts in the develo
   assert.match(markup,/Candidate laps 10/);assert.match(markup,/complete accepted 2/);assert.match(markup,/insufficient-complete-laps/);
  }finally{await server.close();}
 });
+
+test('dynamic circuits use Austin exact appearance, renderer and calculated-boundary defaults',async()=>{
+ const {createServer}=await import('vite');const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
+ const {default:austin}=await import('../src/circuits/tracks/austin.js');
+ const {defaultAppearance,palette}=await import('../src/circuits/annotations.js');
+ const {calculatedBoundaryPreview}=await import('../src/circuits/boundaryAudit.js');
+ assert.equal(defaultAppearance.cornerLabelScale,1.65);assert.equal(defaultAppearance.cornerLabelSpacing,1.15);
+ assert.deepEqual(palette,['#ed3897','#f6ce42','#40bff2']);
+ const b=fixture(),dynamic=preparedCircuit(b),geometry=calibrationGeometry(b.calibration);
+ assert.equal(dynamic.motion,austin.motion);assert.equal(dynamic.flagColors,austin.flagColors);
+ const make=circuit=>{
+  const value={...emptyAnnotations(circuit,geometry),provenance:'synthetic unit fixture',
+   corners:Array.from({length:20},(_,i)=>({number:i+1,letter:i===1?'A':'',at:(i/20)**1.1,imported:true,status:'provisional',offset:{x:450,y:-450}})),
+   startFinish:{at:.98,status:'provisional',calculated:true},sector1End:{at:.19,status:'provisional',calculated:true},sector2End:{at:.72,status:'provisional',calculated:true}};
+  return resolveBoundarySources({...value,sector1End:{at:.33,status:'verified'}},value);
+ };
+ const server=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom'});
+ try{
+  const {default:Renderer}=await server.ssrLoadModule('/src/circuits/CircuitRenderer.jsx');
+  const render=(circuit,annotations)=>renderToStaticMarkup(createElement(Renderer,{circuit:{...circuit,name:'Fixture'},geometry,annotations}));
+  const a=make(austin),m=make(dynamic),original=JSON.stringify(a);
+  assert.equal(render(austin,a),render(dynamic,m));
+  assert.equal(render(dynamic,m),render(dynamic,calculatedBoundaryPreview(m)));
+  const html=render(dynamic,m);
+  assert.equal((html.match(/data-layer="corner"/g)||[]).length,20);
+  assert.match(html,/data-corner="2A"/);assert.match(html,/r="255.75"/);
+  for(const color of palette)assert.ok(html.includes(color));
+  assert.equal((html.match(/data-sector=/g)||[]).length,4); // S1 wraps through origin.
+  assert.equal(JSON.stringify(a),original);
+ }finally{await server.close();}
+});

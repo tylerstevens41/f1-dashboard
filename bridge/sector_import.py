@@ -1,5 +1,6 @@
 """Offline multi-lap timing/GPS boundaries; uses only the FastF1 environment."""
 import argparse
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -120,9 +121,15 @@ def circular_median(values, minimum=5):
 
 def fia_check(result):
     """Coarse independent map checks, never force GPS fractions to FIA distances."""
-    if result['circuitId'] != 'austin' or result['sectorSource']['year'] != 2026:
+    circuit=result['circuitId'];year=result['sectorSource']['year']
+    if not isinstance(circuit,str) or not re.fullmatch(r'[a-z0-9-]+',circuit) or not isinstance(year,int):
+        return {'status':'unavailable','warnings':['No event-specific reference configured']}
+    path=Path(__file__).resolve().parent.parent/'config/circuit-references'/f'{circuit}-{year}.json'
+    if not path.is_file():
         return {'status': 'unavailable', 'warnings': ['No event-specific reference configured']}
-    reference=read(Path(__file__).resolve().parent.parent/'config/circuit-references/austin-2026.json')
+    reference=read(path)
+    if reference.get('schema')!='circuit-physical-reference-v1' or reference.get('circuitId')!=circuit or reference.get('season')!=year:
+        return {'status':'unavailable','warnings':['Event-specific reference identity mismatch']}
     direction = result['direction']
     s, a, b = [result[k]['at'] for k in KEYS]
     lengths = [((y-x)*direction) % 1*reference['lengthMetres'] for x, y in ((s,a),(a,b),(b,s))]
@@ -132,18 +139,21 @@ def fia_check(result):
         if abs(estimated-official) > official*.10:
             warnings.append(f'Sector {i+1} racing-line ratio differs from FIA distance by over 10%')
     corners = {c['number']: c for c in result['corners'] if not c.get('letter')}
-    for number, boundary in ((7,a),(13,b)):
+    for intermediate in reference.get('intermediates',[]):
+        number=intermediate['beforeTurn'];boundary=result[intermediate['key']]['at'];expected=intermediate['distanceMetres']
         if number not in corners:
             warnings.append(f'T{number} reference unavailable')
             continue
         distance = ((corners[number]['at']-boundary)*direction) % 1*reference['lengthMetres']
-        checks.append({'beforeTurn': number, 'geometryRatioScaledMetres': distance, 'fiaMetres':65})
-        if abs(distance-65)>100:
+        checks.append({'beforeTurn': number, 'geometryRatioScaledMetres': distance, 'fiaMetres':expected})
+        if abs(distance-expected)>100:
             warnings.append(f'Intermediate before T{number} disagrees with the FIA map')
-    if 20 in corners and 1 in corners:
-        gap = ((corners[1]['at']-corners[20]['at'])*direction) % 1
-        if ((s-corners[20]['at'])*direction) % 1 >= gap:
-            warnings.append('Timing finish is not between T20 and T1')
+    finish=reference.get('finishReferenceTurns',{})
+    before,after=finish.get('beforeTurn'),finish.get('afterTurn')
+    if before in corners and after in corners:
+        gap = ((corners[after]['at']-corners[before]['at'])*direction) % 1
+        if ((s-corners[before]['at'])*direction) % 1 >= gap:
+            warnings.append(f'Timing finish is not between T{before} and T{after}')
     else:
         warnings.append('Finish reference turns unavailable')
     return {'status': 'discrepancy' if warnings else 'coarsely-consistent-unverified', 'checks': checks, 'warnings': warnings,

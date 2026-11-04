@@ -4,7 +4,7 @@ import re
 
 BRIDGE = Path(__file__).resolve().parent
 HINTS = {
-    'archive': 'Check local authentication/entitlement, published topics and archive byte limits.',
+    'archive': 'Inspect archiveTopicErrors and formatKind: parsing failure is distinct from missing GPS or lap rejection. HTML/markup may be a login, security or routing response; do not share raw response bodies.',
     'extract': 'Check Position.z decoder/schema and session-clock diagnostics; timing messages are required for lap grouping.',
     'clean': 'Inspect sample/lap rejection counts and timestamps before changing quality thresholds.',
     'build': 'Inspect calibration checks and repository exception location; do not force a closed outline.',
@@ -19,8 +19,11 @@ def safe_exception(exc, stage):
     result = {'exceptionType': name, 'stage': stage, 'messageSuppressed': True,
               'hint': HINTS.get(stage, 'Inspect local dependency installation and job diagnostics; no raw upstream error was exported.')}
     code = getattr(exc, 'code', None)
-    if code in {'authentication-required','topic-unpublished','archive-http-error','download-limit','no-events','record-limit','invalid-clip-schema','invalid-event-schema','invalid-position-record-schema'}:
+    if code in {'authentication-required','topic-unpublished','archive-http-error','download-limit','no-events','record-limit','invalid-clip-schema','invalid-event-schema','invalid-position-record-schema','invalid-stream-format'}:
         result['code'] = code
+    if getattr(exc,'formatKind',None) in {'html-or-markup','json-without-elapsed-prefix','quoted-without-elapsed-prefix','unsupported-prefix'}:
+        result['formatKind']=exc.formatKind
+        result['prefixShape']=exc.prefixShape
     if isinstance(exc, ModuleNotFoundError) and isinstance(exc.name, str) and re.fullmatch(r'[A-Za-z0-9_.]{1,80}', exc.name):
         result['missingModule'] = exc.name
     response = getattr(exc, 'response', None)

@@ -188,3 +188,13 @@ For the UI retry, restart with the updated backend:
 In another terminal run `npm run dev`, select the Mexico Race and click Prepare / retry. Expand each window's report. An archive authentication/download/schema exception should no longer be described as insufficient laps. If genuine cleaning rejection remains, inspect its counts before choosing another window or changing any algorithm.
 
 Real Mexico data was not accessible in the implementation environment: the latest probe returned `authentication-required`. Real-data success remains unverified; synthetic decoder, extraction, rejection, error-safety and calibration regressions do not establish Mexico accuracy.
+
+### All topics fail inside elapsed_ms
+
+The supplied Mexico report shows all three streams failing in timestamp parsing before a single event is accepted. This excludes lap cleaning and calibration as the cause of that run. It does not establish whether the returned body contains an alternate timestamp format or non-stream content.
+
+The reader now matches the actual timestamp prefix rather than slicing twelve characters. It accepts elapsed timestamps with supported variable fractional precision and separates the JSON payload at the matched boundary. Timestamp ranges are validated. HTML/markup, JSON lacking an elapsed prefix, quoted content without a prefix and other unsupported prefixes receive `invalid-stream-format`, not a misleading `no-events` conclusion. Nothing is reinterpreted as GPS or assigned a guessed clock.
+
+Per-topic errors include `formatKind` and a 32-character structural mask `prefixShape`: letters become `A`, digits become `9`, and only selected punctuation is retained. No original text, account data or raw response body is exported. These fields distinguish an actual stream-prefix issue from a login/security/routing/error response returned in place of telemetry. HTML alone does not prove which of those caused it.
+
+Pull the latest PR #6 update and repeat the existing Mexico command, then inspect `archiveTopicErrors` in `geometry-diagnostics.json`. Do not share raw stream responses or credentials. If parsing still fails, share the sanitized report; an `html-or-markup` or missing-prefix result requires addressing source delivery rather than choosing additional lap windows.

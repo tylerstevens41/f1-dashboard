@@ -3,6 +3,7 @@ import gzip
 import hashlib
 import json
 import math
+import re
 import time
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -26,9 +27,34 @@ class TopicUnavailable(ArchiveUnavailable):
     pass
 
 
+class ArchiveRecordError(ValueError):
+    def __init__(self, kind, value):
+        super().__init__('Archive response is not a supported timestamp-prefixed stream')
+        self.code='invalid-stream-format'
+        self.formatKind=kind
+        # A structural mask, never a raw response/header/token excerpt.
+        self.prefixShape=''.join('9' if c.isdigit() else 'A' if c.isalpha() else c if c in ':.,{}[]<>/=" \t-' else '?' for c in value[:32])
+
+
 def elapsed_ms(value):
-    hours, minutes, seconds = value.split(':')
+    match=re.fullmatch(r'(\d{1,3}):(\d{2}):(\d{2}(?:\.\d{1,9})?)',value)
+    if not match:
+        raise ValueError('Invalid elapsed timestamp format')
+    hours, minutes, seconds = match.groups()
+    if int(minutes)>=60 or float(seconds)>=60:
+        raise ValueError('Invalid elapsed timestamp range')
     return (int(hours) * 3600 + int(minutes) * 60 + float(seconds)) * 1000
+
+
+def split_stream_record(line):
+    value=line.lstrip('\ufeff \t\r\n')
+    match=re.match(r'(\d{1,3}:\d{2}:\d{2}(?:\.\d{1,9})?)(?=\s*[{\["])',value)
+    if not match:
+        kind=('html-or-markup' if value.startswith('<') else
+              'json-without-elapsed-prefix' if value.startswith(('{','[')) else
+              'quoted-without-elapsed-prefix' if value.startswith('"') else 'unsupported-prefix')
+        raise ArchiveRecordError(kind,value)
+    return elapsed_ms(match.group(1)),value[match.end():].lstrip()
 
 
 def safe_url(path):
@@ -203,10 +229,10 @@ def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/li
         count = 0
         try:
             for line in lines(urljoin(path, stream), budget):
-                offset = elapsed_ms(line[:12])
+                offset, payload_text = split_stream_record(line)
                 if offset > end:
                     break
-                payload = json.loads(line[12:])
+                payload = json.loads(payload_text)
                 if topic == 'Position.z' and origin is None:
                     records = decode(topic, payload)
                     times = [utc_ms(r.get('Utc')) for r in records.values()]
@@ -234,6 +260,8 @@ def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/li
     # Stable ordering across topic streams, including metadata at equal timestamps.
     order = {topic: i for i, topic in enumerate(TOPICS)}
     events.sort(key=lambda e: (e['offsetMs'], order[e['topic']]))
+    if not events and topic_diagnostics:
+        raise ArchiveUnavailable('Archive stream format could not be parsed; see per-topic format diagnostics.', code='invalid-stream-format')
     if not events:
         raise ArchiveUnavailable('No real archive events in the selected window. Choose another session/window or a captured recording.', code='no-events')
     # No fabricated UTC: GPS establishes archive stream origin when available.

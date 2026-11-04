@@ -49,6 +49,41 @@ class ArchiveTests(unittest.TestCase):
             with patch('bridge.archive.lines',side_effect=AssertionError('Cached geometry should not fetch again')):
                 self.assertEqual(fetch_clip('2026/Unit/',0,5,cache,topics=topics)['events'],clip['events'])
 
+    def test_stream_prefix_uses_actual_length_not_twelve_character_slice(self):
+        from bridge.archive import split_stream_record
+        for prefix in ('00:00:01.234','0:00:01.2345678','00:00:01','000:00:01.2'):
+            offset,text=split_stream_record('\ufeff'+prefix+' '+json.dumps({'Key':1}))
+            self.assertAlmostEqual(offset,elapsed_ms(prefix))
+            self.assertEqual(json.loads(text),{'Key':1})
+        for bad in ('00:60:00','00:00:60','nan','-1:00:00'):
+            with self.assertRaises(ValueError):elapsed_ms(bad)
+
+    def test_non_stream_responses_are_classified_without_exporting_private_content(self):
+        from bridge.archive import split_stream_record,ArchiveRecordError
+        from bridge.diagnostics import safe_exception
+        for text,kind in [('<!DOCTYPE html><html>token=SECRET_TOKEN</html>','html-or-markup'),
+                          ('{"token":"SECRET_TOKEN"}','json-without-elapsed-prefix'),
+                          ('"SECRET_TOKEN"','quoted-without-elapsed-prefix')]:
+            with self.assertRaises(ArchiveRecordError) as error:split_stream_record(text)
+            safe=safe_exception(error.exception,'archive')
+            self.assertEqual(safe['formatKind'],kind);self.assertEqual(safe['code'],'invalid-stream-format')
+            self.assertNotIn('SECRET_TOKEN',json.dumps(safe))
+
+    def test_three_topic_prefix_failures_reproduce_report_but_are_not_called_no_events(self):
+        feeds={t:{'StreamPath':t+'.jsonStream'} for t in ('SessionInfo','TimingData','Position.z')}
+        for content,kind in [('<html>private auth response</html>','html-or-markup'),
+                             ('{"private":"response"}','json-without-elapsed-prefix')]:
+            with tempfile.TemporaryDirectory() as cache,patch('bridge.archive.small_json',return_value={'Feeds':feeds}),patch('bridge.archive.lines',return_value=iter(())):
+                def stream(*args,**kwargs):yield content
+                diagnostics={}
+                with patch('bridge.archive.lines',side_effect=stream),self.assertRaises(ArchiveUnavailable) as error:
+                    fetch_clip('2026/Unit/',5400,480,cache,topics=tuple(feeds),diagnostics=diagnostics)
+                self.assertEqual(error.exception.code,'invalid-stream-format')
+                self.assertEqual(len(diagnostics['archiveTopicErrors']),3)
+                self.assertTrue(all(e['formatKind']==kind for e in diagnostics['archiveTopicErrors'].values()))
+                self.assertNotIn('private',json.dumps(diagnostics))
+                self.assertEqual(list(Path(cache).glob('*')),[])
+
     def test_recording_round_trip_and_rejects_non_livef1(self):
         clip={'format':'livef1-clip-v1','source':'LiveF1','durationMs':1000,'originMs':0,'initial':{},'events':[]}
         with tempfile.TemporaryDirectory() as directory:

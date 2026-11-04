@@ -1,3 +1,4 @@
+import {defaultMotion,defaultFlagColors} from '../defaults.js';
 // Annotation positions are fractions of the canonical centreline, in travel order.
 // Do not populate official features until their positions have been calibrated.
 const austin = {
@@ -11,7 +12,7 @@ const austin = {
     // OpenF1 uses the reference embedded in that replay, NOT the LiveF1 reference.
     openf1: { reference: "replay", matrix: [1, 0, 0, 1, 0, 0] },
   },
-  motion: { minBufferMs: 100, maxBufferMs: 5000, maxGapMs: 1500, staleMs: 2500, maxUnitsPerMs: 2 },
+  motion: defaultMotion,
   // Native units/ms is a conservative configurable spike guard, not a speed in metres/s.
   annotations: {
     corners: [], // { number, at, offset: { x, y } }
@@ -20,6 +21,6 @@ const austin = {
     sectors: [], // { at, label }
     startFinish: null, // { at, label }
   },
-  flagColors: { GREEN: "#e7eaf0", YELLOW: "#ffd43b", DOUBLE_YELLOW: "#ffd43b", RED: "#e10600", SC: "#ffd43b", VSC: "#ffd43b", CHEQUERED: "#ffffff" },
+  flagColors: defaultFlagColors,
 };
 export default austin;

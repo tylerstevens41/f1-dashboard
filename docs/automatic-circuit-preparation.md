@@ -1,0 +1,129 @@
+# Automatic circuit preparation (stacked draft PR)
+
+This extends PR #5. Austin continues using its existing `public/circuits/austin-*.json` files and browser overrides. No Austin assets are replaced. Mexico is the first intended real-data validation; the automated tests use explicitly synthetic fixtures. No Mexico layout is bundled or claimed accurate. An archive listing attempt in the implementation environment returned `ArchiveUnavailable`; real Mexico processing could not proceed. Browser visual verification and Windows-native execution were unavailable here; both require local review.
+
+## How it works
+
+The archive index supplies the stable circuit key, event and session metadata. A circuit key plus source season identifies a candidate layout. Event-name aliases with the same key share assets; a different year never silently reuses them. Actual within-season layout/coordinate differences still require the incoming-GPS compatibility check and local review. A season key is not proof that every session used identical geometry.
+
+The coordinator reuses `calibrate.clean_laps` and `calibrate.build`: three complete non-pit laps minimum, finite/stale/spike/gap/closure checks, held-out residuals, and a maximum spatial step check. The optional original-SVG comparison is omitted for a new track, not replaced with a FastF1 outline. Geometry and cars use measured LiveF1 native coordinates, with display inversion applied separately by the existing renderer. Driving order is retained; a reversed FastF1 registration is rejected.
+
+Up to three **480 second windows**, initially at archive offsets **5400, 6000 and 3600 seconds**, are attempted within the explicitly selected session. These are source-stream offsets, not lights-out times. The CLI can specify up to five different windows; it does not guess a different season or layout. An unusable session fails clearly; select another published session and retry. There is no automatic older-season substitution.
+
+A writable `circuit-assets/` directory holds immutable revision JSON files, an atomically replaced current pointer, and per-circuit job progress. This is ignored by Git. Geometry is published first. A separately invoked `.venv-fastf1` worker retrieves/caches corners and multi-lap timing/position information, reuses the existing registration and sector calculation, and fills missing annotation assets. Missing annotations leave geometry usable. Existing annotation records are never replaced on retry. Manual/browser overrides remain keyed to circuit/layout/geometry. Existing calculation-default/source-selection rules apply unchanged.
+
+No full-season recordings are saved: normalized GPS cache is capped at 128 MiB, normalized FastF1 source cache at 128 MiB, and FastF1's disposable cache at 512 MiB. Pruning occurs between attempts/imports. A single FastF1 session load may temporarily exceed the steady-state limit; full session source acquisition is still required by FastF1, even though the LiveF1 collection is windowed. The existing archive downloader has its own byte limits/cache. Prepared display assets and prior revisions are retained rather than discarded with raw caches.
+
+The localhost WebSocket delivers validated bundles dynamically. No frontend source edit, production rebuild, browser refresh or HTTP file server is needed for a new circuit. Preparation never stops/restarts the live source, changes TEST state or controls the animation clock. Disconnecting a browser does not cancel a backend job. Backend/CLI interruption leaves published geometry intact; retry reuses it and fills missing annotations. A process ownership lock prevents duplicate work for the same circuit; stale locks are reclaimed only when the owner is demonstrably gone. Unknown locks are not stolen.
+
+## Windows setup
+
+Run from the repository folder. Keep the two Python environments separate. These commands deliberately use explicit executables; activating an environment is optional.
+
+```powershell
+git fetch origin
+git switch feat/automatic-circuit-preparation
+git pull --ff-only origin feat/automatic-circuit-preparation
+
+# Only create an environment if it does not already exist.
+if (!(Test-Path .\.venv\Scripts\python.exe)) { py -3.12 -m venv .venv }
+.\.venv\Scripts\python.exe -m pip install -r bridge/requirements.txt
+.\.venv\Scripts\python.exe -m pip check
+
+if (!(Test-Path .\.venv-fastf1\Scripts\python.exe)) { py -3.12 -m venv .venv-fastf1 }
+.\.venv-fastf1\Scripts\python.exe -m pip install -r bridge/requirements-corners.txt
+.\.venv-fastf1\Scripts\python.exe -m pip check
+.\.venv-fastf1\Scripts\python.exe -c "import fastf1; print(fastf1.__version__)"
+
+npm ci
+```
+
+Never install both requirements files into the same environment. The bridge does not import FastF1. If using a custom importer environment, set the path in the terminal starting the bridge/coordinator:
+
+```powershell
+$env:F1_FASTF1_PYTHON = (Resolve-Path .\.venv-fastf1\Scripts\python.exe).Path
+```
+
+An absent/broken importer environment produces an annotation warning, not a bridge startup failure. Previously prepared assets load without invoking either importer.
+
+## Mexico through the dashboard
+
+Terminal 1:
+
+```powershell
+.\.venv\Scripts\python.exe -m bridge.server --login --idle --allow-test --allow-prepare
+```
+
+Terminal 2:
+
+```powershell
+npm run dev
+```
+
+1. Open `http://localhost:5173` and the existing live-session page.
+2. Expand Development diagnostics, set archive year **2026**, click **List sessions**.
+3. Select the published **Mexico City Grand Prix · Race**. Selection performs asset lookup; it does not download a recording or change playback.
+4. Expand **Circuit preparation**, click **Prepare / retry missing annotations**. First-time processing may take several minutes. Watch collection/geometry/corners/sectors stages. Missing or unpublished source data is a failure/warning, never a fabricated map.
+5. Load a TEST clip from the same session. Try start offset **5400**, duration **480**, then Play at 1×. This is a starting window, not a guarantee of useful footage; use the existing window diagnostics or another offset if needed.
+6. Geometry appears as soon as it is published; annotations update when available without refresh/restart. If you prepared a different session from the currently playing one, it must not replace the current session's display.
+7. Inspect the outline's complete coverage and direction. Drivers should follow the path without being snapped. Compare all available corner anchors and physical sector locations against a reliable map. Default sector colouring uses calculated boundaries, not equal thirds. Imported records remain provisional.
+8. Pause/resume/restart and change speed; preparation should not alter those behaviors. Test Austin afterward: its local assets, label size/spacing, source selections and animation should be unchanged.
+9. Stop and restart the backend/frontend, reselect Mexico and load a clip. Cached assets should display without repeating preparation.
+
+The toolbar's GPS compatibility status is independent of annotation confidence. At least **five fresh on-track driver positions** are required for the initial sample check. Recent positional p95 must be within **3% of geometry extent**; otherwise markers are withheld. This is a configurable-code conservative diagnostic, not an accuracy certificate. Missing/stale samples produce `waiting-for-gps`, shifted coordinates produce `incompatible`, and aligned samples produce `compatible-sample`. Cars are not projected onto the racing line to conceal errors. The same guard applies to dynamic TEST and LIVE circuits; Austin's existing behavior is unchanged.
+
+If fewer than five drivers are available, the dynamic outline remains visible while driver markers wait. A single driver-only recording is therefore not sufficient for this initial check.
+
+## CLI Mexico preparation and batch resume
+
+Use this instead of the UI job, or after stopping other preparation jobs. The normal bridge may keep running for viewing; it receives updated assets on its next lookup (reselect the archive session or reconnect). UI-started jobs push updates as they progress.
+
+```powershell
+.\.venv\Scripts\python.exe -m bridge.preparation --year 2026 --event Mexico --session Race --login
+```
+
+Only the explicitly requested season/session is used. Local LiveF1 login stays on the backend. If no unique matching archive session exists, the command stops instead of selecting another race. Existing complete assets are skipped; incomplete assets retain their geometry and retry missing annotations.
+
+If all default windows lack complete laps, choose bounded alternatives without editing JSON:
+
+```powershell
+.\.venv\Scripts\python.exe -m bridge.preparation --year 2026 --event Mexico --session Race --windows 4200 4800 6600 --retry-annotations
+```
+
+Prepare available race sessions serially:
+
+```powershell
+.\.venv\Scripts\python.exe -m bridge.preparation --year 2026 --batch --login --retry-annotations
+```
+
+Rerun to resume. The process deduplicates circuit keys, skips complete assets, preserves Austin, continues after per-circuit failure, and records complete/incomplete/failed/existing-local-reference outcomes. Missing stable metadata is explicitly failed/unsupported, not assigned an invented circuit identity. It does not claim calendar-wide support merely because events were listed.
+
+```powershell
+Get-Content .\circuit-assets\batch.json
+Get-ChildItem .\circuit-assets -Filter job.json -Recurse | ForEach-Object {
+    Get-Content $_.FullName
+}
+```
+
+`--store C:\path\to\circuit-assets` and backend `--circuit-store C:\path\to\circuit-assets` must agree if you use a custom writable location. Do not point this at `public/circuits` or an authentication cache.
+
+## Preparation, validation and LIVE readiness
+
+- **Geometry-ready:** usable geometry passed automatic closure/held-out/coverage checks; annotations may be absent.
+- **Complete preparation:** geometry, corner import and sector calculation succeeded. This is not physical verification.
+- **Provisional:** generated geometry/annotations have not been independently reviewed; precision and FIA warnings remain intact.
+- **GPS compatible sample:** fresh incoming positions align with the stored native mapping. This is a sampled runtime check, not proof that an entire live weekend is validated.
+
+Keep this PR draft until real Mexico data and local visuals have been reviewed. No DRS zones, pit lanes or official timing-line coordinates are invented. The runtime guard detects large translation/scale/layout disagreement; it does not solve recalibration automatically and can miss mismatches that happen to overlap the observed track sections. No hardware deployment or automatic race-weekend switching is added here.
+
+## Checks
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s bridge/tests
+.\.venv-fastf1\Scripts\python.exe -m unittest bridge.tests.test_corner_import bridge.tests.test_sector_import bridge.tests.test_boundary_audit bridge.tests.test_preparation_worker
+npm test
+npm run lint
+npm run build
+```
+
+Coordinator tests use synthetic source samples and simulated acceptance metadata; they do not establish real-world Mexico accuracy. The separate worker test reads a cached synthetic source, imports through its actual dedicated interpreter, writes an annotation result, and confirms the calibration input is unchanged.

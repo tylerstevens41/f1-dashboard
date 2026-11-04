@@ -44,3 +44,6 @@ data-cache/
 recordings/
 .livef1/
 *f1tv_auth_token*.json
+
+# Locally prepared circuit assets and source caches
+circuit-assets/

@@ -1,3 +1,4 @@
+import {gpsCompatibility} from './prepared';
 import AnimationDiagnostics from '../animation/AnimationDiagnostics';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import CircuitRenderer from './CircuitRenderer';
@@ -13,8 +14,8 @@ import './live-circuit.css';
 
 
 export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='LIVE',
-  drivers=[], selectedDriver=null, onSelectDriver }) {
-  const circuit=findCircuit(circuitName);
+  drivers=[], selectedDriver=null, onSelectDriver, circuitOverride=null, prepared=null, clockMs=null }) {
+  const circuit=circuitOverride??findCircuit(circuitName);
   const [loaded,setLoaded]=useState(null);
   const [error,setError]=useState('');
   const [revision,setRevision]=useState(0);
@@ -39,6 +40,10 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
     const controller=new AbortController();
     async function load(){
       try{
+        if(prepared){
+          if(!controller.signal.aborted)setLoaded({legacy:null,calibration:prepared.calibration,annotationFile:null,cornerFile:prepared.corners,sectorFile:prepared.sectors});
+          return;
+        }
         const reference=await fetch(circuit.sources.livef1.referenceFile,{signal:controller.signal,cache:'no-store'});
         if(!reference.ok)throw new Error('GPS reference unavailable');
         const legacy=await reference.json();
@@ -70,7 +75,7 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
       }catch(err){if(err.name!=='AbortError')setError(err.message);}
     }
     load();return()=>controller.abort();
-  },[circuit,revision]);
+  },[circuit,revision,prepared]);
   const geometry=useMemo(()=>loaded?calibrationGeometry(loaded.calibration,loaded.legacy):null,[loaded]);
   const annotations=useMemo(()=>{
     if(!geometry || !circuit)return null;
@@ -123,6 +128,7 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
         color:/^[0-9a-f]{6}$/i.test(raw)?`#${raw}`:'#FFFFFF',label:driver.name_acronym??driver.driver_number}];
     });
   },[drivers,geometry]);
+  const compatibility=useMemo(()=>geometry&&prepared?gpsCompatibility(geometry,drivers,clockMs):null,[geometry,prepared,drivers,clockMs]);
   if(!circuit)return <p>No configured circuit for {circuitName}.</p>;
   const calibration=loaded?.calibration;
   const status=calibration?.status??'missing';
@@ -155,9 +161,10 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
       {auditRows.map(row=><p key={row.key}>{row.key}: calculated {row.calculatedAt?.toFixed(6)??'missing'} · displayed {row.displayedAt?.toFixed(6)??'hidden'} · {row.origin}{row.different?' · OVERRIDE DIFFERS FROM CALCULATION':''}</p>)}
       <button onClick={()=>downloadAudit(browserBoundaryAudit(displayAnnotations,geometry,auditRows,circuitSvg.current))}>Export safe browser boundary audit</button>
     </details>}
+    {compatibility && <p role={compatibility.status==='incompatible'?'alert':undefined} className="calibration-status">{mode} GPS compatibility: {compatibility.status} · {compatibility.samples} recent on-track drivers · p95 {compatibility.p95FractionOfDiagonal==null?'—':`${(compatibility.p95FractionOfDiagonal*100).toFixed(2)}% of extent`}. {compatibility.status!=='compatible-sample'?'Driver markers withheld until fresh GPS aligns; no snapping or historical substitution.':'Sample alignment passed; full live session remains locally unverified.'}</p>}
     {error && <p role="alert" className="calibration-error">{error}</p>}
     <div className="live-circuit-viewport">
-      {geometry?<CircuitRenderer geometry={geometry} circuit={circuit} drivers={layers.drivers?markers:[]}
+      {geometry?<CircuitRenderer geometry={geometry} circuit={circuit} drivers={layers.drivers&&(!compatibility||compatibility.status==='compatible-sample')?markers:[]}
         selectedDriver={selectedDriver} onSelectDriver={onSelectDriver} animate animation={animation}
         showLabels={labels} showTrack={!debug||layers.outline} annotations={displayAnnotations} svgRef={circuitSvg} appearance={appearance}
         annotationsCalibrated={true} previewProvisional={import.meta.env.DEV && preview} annotationSelection={selection} editingAnnotations={import.meta.env.DEV && Boolean(placing)} onClick={place}>

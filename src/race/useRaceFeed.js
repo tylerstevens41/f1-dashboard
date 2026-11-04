@@ -1,3 +1,4 @@
+import {validatePrepared,sessionYear,sessionCircuitKey} from '../circuits/prepared.js';
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { initialRaceState, raceReducer } from './state';
 import { connectRaceSocket } from './socket';
@@ -9,6 +10,8 @@ export default function useRaceFeed() {
   const [connection, setConnection] = useState('connecting');
   const [controls, setControls] = useState(false);
   const [sessions, setSessions] = useState([]);
+  const [circuitJobs,setCircuitJobs]=useState({});
+  const [preparedBundles,setPreparedBundles]=useState({});
   const [windows, setWindows] = useState([]);
   const [controlError, setControlError] = useState('');
   const [now, setNow] = useState(() => Date.now());
@@ -16,6 +19,13 @@ export default function useRaceFeed() {
   useEffect(() => {
     const client = connectRaceSocket({ url: 'ws://127.0.0.1:8765', onConnection: setConnection,
       onMessage: message => {
+        if(message.type==='circuit-job'){
+          setCircuitJobs(values=>({...values,[message.job.identity?.path??message.job.path??'current']:message.job}));return;
+        }
+        if(message.type==='circuit-assets'){
+          try{const bundle=validatePrepared(message.bundle);setPreparedBundles(values=>({...values,[bundle.identity.assetKey]:bundle}));}
+          catch{setControlError('Prepared circuit rejected: schema, calibration or annotation geometry mismatch.');}return;
+        }
         animation.ingest(message,performance.now());
         if (message.type === 'windows') setWindows(message.windows ?? []);
         if (message.type === 'controls') setControls(message.enabled === true);
@@ -29,7 +39,12 @@ export default function useRaceFeed() {
     const ticker = setInterval(() => setNow(Date.now()), 250);
     return () => { clearInterval(ticker); client.close(); stopAnimation(); };
   }, [animation]);
-  return { animation, race, connection, controls, sessions, windows, controlError,
+  const session=race.topics.SessionInfo;
+  const year=sessionYear(session),key=sessionCircuitKey(session),path=race.playbackInfo?.sessionPath;
+  useEffect(()=>{
+    if(connection==='connected'&&year&&key)transport.current?.send({action:'circuit-lookup',year,path:race.mode==='TEST'?path:undefined});
+  },[connection,year,key,path,race.mode]);
+  return { preparedBundles,circuitJobs,animation, race, connection, controls, sessions, windows, controlError,
     clockMs: race.mode === 'TEST' ? race.clockMs : now,
     send: command => transport.current?.send(command) };
 }

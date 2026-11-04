@@ -107,7 +107,7 @@ def aligned_laps(laps):
     return output
 
 
-def build(dataset,svg,svg_path_id=None,threshold=0.015,layout='austin-livef1-v1'):
+def build(dataset,svg=None,svg_path_id=None,threshold=0.015,layout='austin-livef1-v1'):
     if dataset.get('source')!='LiveF1' or dataset.get('schema')!='livef1-calibration-samples-v1':raise ValueError('Expected collected LiveF1 samples')
     laps,reasons=clean_laps(dataset)
     if len(laps)<3:raise ValueError(f'Need at least 3 complete non-pit laps (found {len(laps)}); rejection counts: {reasons}')
@@ -118,11 +118,14 @@ def build(dataset,svg,svg_path_id=None,threshold=0.015,layout='austin-livef1-v1'
     representative=(np.roll(representative,1,axis=0)+2*representative+np.roll(representative,-1,axis=0))/4
     heldout=np.concatenate([lap['points'] for lap in holdout])
     validation=metrics(heldout,representative)
-    original,path_id=sample_svg(svg,svg_path_id)
-    fit=register_svg(original,representative)
-    sim_error=max(fit['similarity'][key]['p95FractionOfDiagonal'] for key in ('trajectoryToOutline','outlineToTrajectory'))
-    affine_error=max(fit['affine'][key]['p95FractionOfDiagonal'] for key in ('trajectoryToOutline','outlineToTrajectory'))
-    decision='similarity-transform-sufficient' if sim_error<=threshold else 'affine-transform-candidate' if affine_error<=threshold else 'rebuild-from-gps-recommended'
+    original=np.empty((0,2)); comparison={'decision':'gps-derived-no-existing-svg'}
+    if svg is not None:
+        original,path_id=sample_svg(svg,svg_path_id)
+        fit=register_svg(original,representative)
+        sim_error=max(fit['similarity'][key]['p95FractionOfDiagonal'] for key in ('trajectoryToOutline','outlineToTrajectory'))
+        affine_error=max(fit['affine'][key]['p95FractionOfDiagonal'] for key in ('trajectoryToOutline','outlineToTrajectory'))
+        decision='similarity-transform-sufficient' if sim_error<=threshold else 'affine-transform-candidate' if affine_error<=threshold else 'rebuild-from-gps-recommended'
+        comparison={'pathId':path_id,'svgSha256':hashlib.sha256(Path(svg).read_bytes()).hexdigest(),'decision':decision,**fit}
     diagonal=float(np.linalg.norm(np.ptp(representative,axis=0)))
     points=[{'x':float(x),'y':float(y)} for x,y in representative]
     closed=points+[points[0]]
@@ -136,7 +139,7 @@ def build(dataset,svg,svg_path_id=None,threshold=0.015,layout='austin-livef1-v1'
                           'trainingLapIds':[lap['id'] for lap in training],'heldOutLapIds':[lap['id'] for lap in holdout],
                           'lapCount':len(laps),'driverCount':len(set(lap['driver'] for lap in laps)),
                           'rejected':reasons,'verified':False},
-            'svgComparison':{'pathId':path_id,'svgSha256':hashlib.sha256(Path(svg).read_bytes()).hexdigest(),'decision':decision,**fit},
+            'svgComparison':comparison,
             'provenance':{'sessionPaths':dataset.get('sessionPaths',[dataset.get('sessionPath')]),'collectedSampleCount':len(dataset['samples']),
                           'createdAt':datetime.now(timezone.utc).isoformat(),'synthetic':bool(dataset.get('synthetic',False))},
             'debug':{'raw':[[p['x'],p['y']] for p in dataset['samples'][::max(1,len(dataset['samples'])//6000)] if all(isinstance(p.get(k),(int,float)) and np.isfinite(p[k]) for k in ('x','y'))],

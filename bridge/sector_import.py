@@ -45,12 +45,13 @@ def crossing_times(lap):
     return [lap['start'], lap['start']+lap['s1'], lap['start']+lap['s1']+lap['s2'], lap['end']]
 
 
-def collect_laps(session, limit=40):
+def collect_laps(session, limit=40, progress=None):
     """Bounded original samples, padded using the full driver stream at lap edges."""
     import pandas as pd
     def seconds(value):
         return None if pd.isna(value) else float(value.total_seconds())
     result, rejected = [], Counter()
+    session_seconds={}  # Same boolean slices, calculate full-stream seconds once per driver.
     # Round-robin race laps across drivers, rather than only the fastest driver.
     rows = session.laps.sort_values(['LapNumber', 'DriverNumber'])
     for _, row in rows.iterrows():
@@ -68,8 +69,10 @@ def collect_laps(session, limit=40):
                    'trackStatus': str(row.TrackStatus), 'clockChecked': True}
             crossing_times(lap)
             pos = session.pos_data[lap['driver']]
-            pos = pos[(pos.SessionTime.dt.total_seconds() >= lap['start']-1) &
-                      (pos.SessionTime.dt.total_seconds() <= lap['end']+1)]
+            if lap['driver'] not in session_seconds:
+                session_seconds[lap['driver']]=pos.SessionTime.dt.total_seconds()
+            times_for_driver=session_seconds[lap['driver']]
+            pos = pos[(times_for_driver >= lap['start']-1) & (times_for_driver <= lap['end']+1)]
             # No merged/resampled telemetry or interpolated edge samples.
             if len(pos) < 100 or (pos.Source != 'pos').any() or (pos.Status != 'OnTrack').any():
                 raise ImportFailure('invalid-original-position-data')
@@ -96,6 +99,11 @@ def collect_laps(session, limit=40):
             rejected[str(exc)] += 1
         except (KeyError, TypeError, ValueError, AttributeError):
             rejected['missing-lap-or-position-fields'] += 1
+        finally:
+            inspected=len(result)+sum(rejected.values())
+            if progress is not None and (inspected%25==0 or len(result)>=limit):
+                progress(inspected=inspected,accepted=len(result),rejected=sum(rejected.values()))
+    if progress is not None:progress(inspected=len(result)+sum(rejected.values()),accepted=len(result),rejected=sum(rejected.values()))
     return {'schema': 'fastf1-boundary-laps-v1', 'timeBasis': 'SessionTime-seconds; Date checked against session.t0_date',
             'laps': result, 'rejected': dict(rejected), 'limit': limit, 'inspected': len(result)+sum(rejected.values())}
 

@@ -199,6 +199,20 @@ class PreparationBridgeTests(unittest.IsolatedAsyncioTestCase):
             await bridge.command(None,{'action':'circuit-prepare','year':2026,'path':session()['path']})
             self.assertIn('--allow-prepare',sent[-1]['job']['error'])
 
+    async def test_annotation_checkpoint_pushes_assets_without_resetting_live_state(self):
+        from bridge.server import Bridge
+        with tempfile.TemporaryDirectory() as root:
+            bridge=Bridge();bridge.configure_preparation(root,True)
+            value=bundle();value['corners']=annotation(value);bridge.asset_store.publish(value)
+            messages=[]
+            async def broadcast(message):messages.append(message)
+            bridge.broadcast=broadcast;before=bridge.state.generation
+            await bridge.preparation_progress({'identity':value['identity'],'stage':'annotation-checkpoint','state':'preparing'})
+            self.assertEqual([m['type'] for m in messages],['circuit-job','circuit-assets'])
+            self.assertIsNotNone(messages[-1]['bundle']['corners'])
+            self.assertEqual(bridge.state.generation,before)
+
+
 class AnnotationCompletionTests(unittest.TestCase):
     def test_complete_requires_imported_corners_and_all_three_timing_calculations(self):
         from bridge.preparation import annotations_complete

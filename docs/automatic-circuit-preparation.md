@@ -301,3 +301,74 @@ git pull --ff-only origin feat/automatic-circuit-preparation
 Existing geometry is reused; it is not rebuilt or overwritten by annotation retries. The `.venv-fastf1` worker runs the same FastF1 importer used for Austin. Do not combine requirements files or delete the accepted geometry. If FastF1 retrieval still fails/times out, provide the saved warning. Do not mark annotations complete or verified to bypass that failure.
 
 To view the accepted geometry and shared live/test rendering, start the backend/Vite as above, select Mexico Race and load a TEST clip at offset **96138**, duration **480**. Corners/sector colours appear automatically when those actual imports succeed. Until then, missing annotations remain absent rather than invented.
+
+## FastF1 annotation timeout: staged diagnostics and resume
+
+The confirmed Windows failure was a 600-second annotation timeout after Mexico geometry succeeded. The old worker discarded stdout/stderr and returned only after `session.load(telemetry=True)`, circuit information, reference telemetry, multi-lap collection, registration and calculation all finished. That design could not identify the slow operation, and it could not preserve/publish corners if later work timed out. The exact operation causing the Windows stall is **not established by the old timeout alone**.
+
+The shared `corner_import.fetch` now instruments and stages FastF1's **public** API:
+
+1. Import/cache setup and session retrieval.
+2. `session.load(telemetry=False, weather=False, messages=False)` for lap/timing data.
+3. The existing `session.get_circuit_info()` API for raw corner metadata, cached immediately.
+4. `session.load(laps=False, telemetry=True, weather=False, messages=False)` for the same FastF1 telemetry and `t0_date` processing Austin uses. No private API or alternate clock is substituted.
+5. The same circuit-info API with telemetry-derived optional marker distances, and the same fastest-lap position reference.
+6. The unchanged `align` registration and corner offset calculation; aligned corners are checkpointed and published **before** sector-lap collection.
+7. The existing `collect_laps` and `add_boundaries` functions, followed by a separate sector checkpoint.
+
+FastF1 3.9.0's installed `Session.get_circuit_info` delegates to its circuit-information API and calls `add_marker_distance`. That function tolerates unloaded telemetry, so X/Y/angle/number metadata can be cached before full telemetry. **Those raw markers cannot yet be safely rendered on our calibrated outline:** our exact Austin registration requires a corresponding reference position lap. We do not pretend raw metadata is aligned annotation output.
+
+FastF1's public telemetry loader fetches/parses **both car data and positions**, and uses them for its time base. We retain that processing to preserve Austin results. Only exact known library log literals are converted into `car-data-download`, `car-data-parse`, `position-data-download`, `position-data-parse`, and cached-data stages. No formatted library log arguments, URLs, headers or response bodies are exported. Multi-lap progress shows accepted/rejected/inspected counts. A safe optimization calculates each driver's full-stream session-seconds Series once and reuses exactly the original boolean slices; timing math, interpolation and rejection criteria are unchanged and parity-tested.
+
+### Inspect and retry annotations only on Windows
+
+Stop the old backend before pulling. No dependency changes are required; retain `.venv` and `.venv-fastf1` separately.
+
+```powershell
+git switch feat/automatic-circuit-preparation
+git pull --ff-only origin feat/automatic-circuit-preparation
+
+# Require accepted cached geometry. This flag never collects GPS or builds geometry.
+.\.venv\Scripts\python.exe -m bridge.preparation --year 2026 --event Mexico --session Race --annotations-only --login
+```
+
+While it runs, use a second terminal:
+
+```powershell
+$diag = '.\circuit-assets\circuit-65-2026\annotation-diagnostics.json'
+$d = Get-Content $diag -Raw | ConvertFrom-Json
+$d | Select-Object phase, state, startedAt, updatedAt, elapsedSeconds, phaseElapsedSeconds, metadataCorners, corners, inspected, accepted, rejected, failedPhase, timedOut
+$d.events | Select-Object at, phase, elapsedSeconds, inspected, accepted, rejected | Format-Table -AutoSize
+$d.phaseDurationsSeconds | ConvertTo-Json
+$d.error | ConvertTo-Json -Depth 8
+```
+
+Repeat the inspection command to see the latest phase. The bridge also persists an annotation heartbeat in `job.json`; the development preparation panel shows current phase, elapsed times, metadata/aligned-corner counts and any failure. CLI annotation heartbeats omit repeated geometry history; the persistent diagnostic file retains timestamped stage history. A timed-out file records the exact last phase rather than an assumed cause. Last failed phase is retained for calculation/data errors. One previous run's diagnostics are retained as `annotation-diagnostics.previous.json`.
+
+The overall timeout remains **600 seconds**, unchanged. It is not increased to hide a stall. Download versus parsing versus registration/collection stages now distinguish likely network/source latency from CPU/data processing and cache work. A phase boundary measures the public call/log interval, not a network packet profiler.
+
+Checkpoint artifacts are scoped to session plus calibrated geometry fingerprint in:
+
+`circuit-assets/circuit-65-2026/annotations/`
+
+The normalized metadata/reference/multi-lap sources remain under `circuit-assets/annotation-sources/`; FastF1's disposable cache remains `circuit-assets/fastf1-cache/`. Successfully aligned corners and completed sectors are not pruned with source caches. Partial results are validated and atomically published as soon as the worker writes them, so corners can appear while sectors are pending. Timeout/interruption retains completed checkpoints and accepted geometry. Retry reads them first; if both annotation checkpoints exist, it skips FastF1 entirely. If only sectors are missing, it retains corners and uses a completed normalized multi-lap source when available, otherwise reuses FastF1's cache for missing source acquisition. It does not promise no network access when the required source was never retrieved.
+
+A sector failure cannot discard imported corners. Existing reviewed/browser overrides and circuit styling are unchanged. Geometry remains usable; `complete` stays false until both actual imported corners and timing-calculated S/F/S1/S2 succeed. All generated positions remain provisional.
+
+### View the result
+
+Terminal 1:
+
+```powershell
+.\.venv\Scripts\python.exe -m bridge.server --login --idle --allow-test --allow-prepare
+```
+
+Terminal 2:
+
+```powershell
+npm run dev
+```
+
+Select Mexico Race and load TEST offset **96138**, duration **480**. If the CLI completed while the bridge was already open, reselect the session to refresh its asset lookup. A UI-started preparation job pushes checkpoints automatically with no refresh, Vite restart or playback reset. The shared Austin renderer displays FastF1-provided corners with the existing 1.65× circles/text and 1.15× spacing, and the same magenta/yellow/cyan sector centre lines once calculated. No manual JSON imports are required.
+
+A bounded real FastF1 metadata/lap probe in the implementation environment exceeded 30 seconds. No real Mexico FastF1 annotations or visual success were obtained here; the actual Windows bottleneck must be read from the new stage report. Please share this sanitized diagnostic JSON if it still stalls, not library logs or credentials.

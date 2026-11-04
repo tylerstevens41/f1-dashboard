@@ -103,7 +103,7 @@ class Bridge:
 
     async def preparation_progress(self, job):
         await self.broadcast({'version':1,'type':'circuit-job','job':job})
-        if job.get('stage') in ('geometry','ready'):
+        if job.get('stage') in ('geometry','ready','annotation-checkpoint'):
             bundle = await asyncio.to_thread(self.asset_store.get, job['identity'])
             if bundle:
                 await self.broadcast({'version':1,'type':'circuit-assets','bundle':bundle})

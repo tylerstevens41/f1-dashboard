@@ -89,3 +89,15 @@ test('dynamic circuits use Austin exact appearance, renderer and calculated-boun
   assert.equal(JSON.stringify(a),original);
  }finally{await server.close();}
 });
+
+test('FastF1 phase diagnostics show timestamp, stalled phase and partial annotation readiness',async()=>{
+ const {createServer}=await import('vite');const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
+ const server=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom'});
+ try{
+  const {default:Panel}=await server.ssrLoadModule('/src/circuits/PreparationPanel.jsx');
+  const job={state:'ready',complete:false,annotationDiagnostics:{phase:'car-data-download',state:'timeout',startedAt:1793759885,elapsedSeconds:600,phaseElapsedSeconds:570,metadataCorners:17,corners:17,failedPhase:'multi-lap-collection',error:{exceptionType:'TimeoutExpired',hint:'Inspect source access'}}};
+  const html=renderToStaticMarkup(createElement(Panel,{job,onPrepare:()=>{}}));
+  assert.match(html,/FastF1 annotation diagnostics/);assert.match(html,/car-data-download/);assert.match(html,/600s/);
+  assert.match(html,/aligned corners 17/);assert.match(html,/Failed phase: multi-lap-collection/);
+ }finally{await server.close();}
+});

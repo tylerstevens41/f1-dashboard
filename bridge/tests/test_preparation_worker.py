@@ -35,7 +35,7 @@ class PreparationWorkerTests(unittest.TestCase):
         from bridge.preparation_worker import run
         from bridge.corner_import import ImportFailure
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp);cal=root/'cal.json';cal.write_text('{}')
+            root=Path(temp);cal=root/'cal.json';cal.write_text(json.dumps(lap_fixture()[1]))
             request={'identity':{'path':'unit','year':2026,'event':'unit','session':'Race'},'calibration':str(cal),'output':str(root/'output.json'),'cache':str(root/'cache'),'sourceCache':str(root/'sources')}
             with patch('bridge.preparation_worker.fetch',side_effect=ImportFailure('Fixture source unavailable')):
                 run(request)

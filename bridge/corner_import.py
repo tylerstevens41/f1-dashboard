@@ -52,7 +52,9 @@ def write(path, value):
     path.write_text(json.dumps(value, indent=2, allow_nan=False), encoding='utf-8')
 
 
-def fetch(year, event, session_name, cache, lap_collector=None, cache_only=False):
+def fetch(year, event, session_name, cache, lap_collector=None, cache_only=False, progress=None, metadata_ready=None, source_ready=None):
+    notify=progress or (lambda *a,**k:None)
+    notify('fastf1-import')
     import fastf1
     cache = Path(cache)
     cache.mkdir(parents=True, exist_ok=True)
@@ -69,15 +71,31 @@ def fetch(year, event, session_name, cache, lap_collector=None, cache_only=False
             except PermissionError:
                 continue  # Active Windows cache files must not break an import.
             total -= size
+    notify('fastf1-cache-prune')
     prune()
+    notify('fastf1-cache-open')
     fastf1.Cache.enable_cache(str(cache))
     fastf1.Cache.offline_mode(cache_only)
     try:
+        notify('fastf1-session-retrieval')
         session = fastf1.get_session(year, event, session_name)
-        session.load(telemetry=True, weather=False, messages=False)
+        notify('fastf1-laps-load')
+        session.load(telemetry=False, weather=False, messages=False)
+        notify('corner-metadata-retrieval')
+        metadata=session.get_circuit_info()
+        if metadata is None:raise ImportFailure('FastF1 returned no circuit information')
+        if metadata_ready is not None:
+            metadata_ready({'corners':normalize(metadata.corners.to_dict('records')),'rotation':float(metadata.rotation),
+                            'year':year,'event':event,'session':session_name,'circuitKey':session.session_info['Meeting']['Circuit']['Key']})
+        notify('fastf1-telemetry-load')
+        # Public FastF1 API retains its own car+position/t0 clock processing.
+        # Do not bypass it with a different position clock or private loader.
+        session.load(laps=False,telemetry=True,weather=False,messages=False)
+        notify('corner-metadata-distances')
         info = session.get_circuit_info()
         if info is None:
             raise ImportFailure('FastF1 returned no circuit information')
+        notify('reference-lap-position')
         lap = session.laps.pick_fastest()
         if lap is None:
             raise ImportFailure('No reference lap available')
@@ -91,8 +109,11 @@ def fetch(year, event, session_name, cache, lap_collector=None, cache_only=False
                 'reference': pos.to_numpy().astype(float).tolist(),
                 'referenceLap': {'driver': str(lap.Driver), 'lap': int(lap.LapNumber)},
                 'warning': 'Visualization markers are manually created and not highly accurate. Distance is telemetry-derived; marshal sectors are not timing sectors.'}
+        if source_ready is not None:source_ready(result)
         if lap_collector is not None:
-            result['boundaryLaps']=lap_collector(session)
+            notify('multi-lap-collection')
+            if progress is None:result['boundaryLaps']=lap_collector(session)
+            else:result['boundaryLaps']=lap_collector(session,progress=lambda **counts:notify('multi-lap-collection',**counts))
         return result
     finally:
         prune()

@@ -127,3 +127,64 @@ npm run build
 ```
 
 Coordinator tests use synthetic source samples and simulated acceptance metadata; they do not establish real-world Mexico accuracy. The separate worker test reads a cached synthetic source, imports through its actual dedicated interpreter, writes an annotation result, and confirms the calibration input is unchanged.
+
+## Mexico geometry failures: structured diagnostic workflow
+
+A generic `source unavailable or insufficient complete on-track laps` from the initial implementation did **not** establish that laps were insufficient. A blanket exception handler used that same message for retrieval, decoder, cache, schema and calibration exceptions. It is now replaced with stage-specific per-window results.
+
+Preparation now requests only **SessionInfo, TimingData and Position.z** rather than downloading/decoding unrelated CarData and other feeds. Previously unrelated telemetry could consume the shared archive byte budget or abort geometry extraction. The normal LIVE/TEST downloader still defaults to its original full topic set and cache key. Partial geometry clips use a separate cache key. Extraction only applies timing deltas; unrelated messages cannot reset the timing seed or abort GPS collection. Samples in a compressed position batch are sorted by source UTC before deduplication. These are reproduced robustness defects, **not a claim that either caused the real Mexico failure**.
+
+No cleaning/closure/gap/staleness/held-out thresholds were relaxed. Candidate lap groups, accepted complete laps and reasons are recorded separately. Incomplete-lap detail distinguishes too few samples, duration outside 40–240 seconds, GPS gaps over 2500 ms, invalid extent and insufficient closure. Those subreason counts can overlap for one rejected lap; other counts identify their sample-versus-lap units explicitly.
+
+Each attempted window now reports:
+
+- Stage, outcome and offset; whether archive retrieval succeeded or failed.
+- Sample-cache and archive-cache use, partial archive event/byte counts and current topic where available.
+- Event counts by topic, capability/parse failures and clock basis.
+- Decoded/accepted GPS records, invalid timestamps, duplicate/older records and represented driver count.
+- GPS-versus-stream clock-skew summary (no raw position/time records).
+- Candidate/accepted lap counts, rejection counts and detailed incomplete-lap reasons.
+- Whether calibration ran, held-out metrics, threshold and spatial coverage check when reached.
+- Exception class, allowlisted error code, repository file/function/line and an actionable hint. Arbitrary exception messages, upstream responses, stack locals, credentials and URLs are **not** exported.
+
+`null` means a stage was not reached or a count is unknown; it is not a measured zero. With a normalized sample-cache hit, original retrieval/extraction counts are reused, explicitly labelled cached. The extraction cache version changed so old sample caches are not mistaken for a new successful extraction. Prior files and prepared assets are not deleted. Topic-filtered requests may need to retrieve a new bounded archive clip once.
+
+The report is saved after every attempt, including failures, at:
+
+`circuit-assets/circuit-65-2026/geometry-diagnostics.json`
+
+It is also retained in `job.json`, emitted as CLI progress JSON and shown in expandable per-window sections in the development Circuit preparation panel. Final failure does not erase the report. The report contains counts and safe failure metadata, not raw telemetry or authentication data, and is the appropriate file to share for further investigation.
+
+After stopping the old backend, pull and rerun:
+
+```powershell
+git switch feat/automatic-circuit-preparation
+git pull --ff-only origin feat/automatic-circuit-preparation
+
+# Existing environment: no dependency changes required.
+.\.venv\Scripts\python.exe -m bridge.preparation --year 2026 --event Mexico --session Race --windows 5400 6000 3600 --login
+
+$report = '.\circuit-assets\circuit-65-2026\geometry-diagnostics.json'
+Get-Content $report -Raw
+Copy-Item $report .\mexico-geometry-default-windows.json
+
+# Optional: inspect alternative windows, preserving the first report above.
+.\.venv\Scripts\python.exe -m bridge.preparation --year 2026 --event Mexico --session Race --windows 4200 4800 6600 --login
+Copy-Item $report .\mexico-geometry-alternative-windows.json
+
+$diagnostics = Get-Content $report -Raw | ConvertFrom-Json
+$diagnostics.windows | Select-Object offset,stage,status,archiveRetrieved,eventCount,decodedPositionRecords,driversRepresented,candidateLaps,acceptedCompleteLaps,calibrationAttempted,reason | Format-Table -AutoSize
+$diagnostics.windows | ForEach-Object { $_.error | ConvertTo-Json -Depth 8 }
+```
+
+Do not delete Austin files, raw recordings or annotation caches to run this. If using a custom `--store`, use that directory for `$report` as well. Already complete assets are intentionally skipped by normal preparation; this procedure targets the observed Mexico case where no geometry exists.
+
+For the UI retry, restart with the updated backend:
+
+```powershell
+.\.venv\Scripts\python.exe -m bridge.server --login --idle --allow-test --allow-prepare
+```
+
+In another terminal run `npm run dev`, select the Mexico Race and click Prepare / retry. Expand each window's report. An archive authentication/download/schema exception should no longer be described as insufficient laps. If genuine cleaning rejection remains, inspect its counts before choosing another window or changing any algorithm.
+
+Real Mexico data was not accessible in the implementation environment: the latest probe returned `authentication-required`. Real-data success remains unverified; synthetic decoder, extraction, rejection, error-safety and calibration regressions do not establish Mexico accuracy.

@@ -15,6 +15,12 @@ from .calibration_math import metrics, register_svg, resample, sample_svg
 MAX_SAMPLES=180000
 
 
+class CalibrationSchemaError(ValueError):
+    def __init__(self, code):
+        super().__init__('Unexpected calibration source schema: '+code)
+        self.code=code
+
+
 def read_json(path):
     path=Path(path)
     if path.stat().st_size>64*1024*1024:raise ValueError('Input exceeds 64 MiB')
@@ -36,29 +42,51 @@ def write_json(path,data):
     finally:temp.unlink(missing_ok=True)
 
 
-def collect_clip(clip):
+def collect_clip(clip, diagnostics=None):
     from livef1.data_processing.etl import function_map
+    stats=diagnostics if diagnostics is not None else {}
+    stats.update(positionMessages=0,decodedPositionRecords=0,acceptedPositionRecords=0,
+                 invalidTimestamps=0,duplicateOrOlderRecords=0,timingMessages=0,ignoredMessages=0)
+    if not isinstance(clip,dict) or not isinstance(clip.get('initial'),dict) or not isinstance(clip.get('events'),list) or not isinstance(clip.get('originMs'),(int,float)) or not np.isfinite(clip['originMs']):
+        raise CalibrationSchemaError('invalid-clip-schema')
     state=RaceState('TEST');state.topics=clip['initial']
-    samples=[];last={}
+    samples=[];last={};drivers=set()
     for event in clip['events']:
-        topic=event['topic'];clock=clip['originMs']+event['offsetMs']
+        if not isinstance(event,dict) or not isinstance(event.get('offsetMs'),(int,float)) or not np.isfinite(event['offsetMs']):
+            raise CalibrationSchemaError('invalid-event-schema')
+        topic=event.get('topic');clock=clip['originMs']+event['offsetMs']
         if topic!='Position.z':
-            state.ingest(topic,event['payload'],clock_ms=clock)
+            # Geometry only needs timing deltas. Unrelated telemetry/identity
+            # must not abort extraction or reset a valid timing seed.
+            if topic=='TimingData':
+                stats['timingMessages']+=1
+                state.ingest(topic,event['payload'],clock_ms=clock)
+            else:stats['ignoredMessages']+=1
             continue
+        stats['positionMessages']+=1
         records=list(function_map[topic]([(None,event['payload'])],None))
+        stats['decodedPositionRecords']+=len(records)
+        if any(not isinstance(r,dict) or 'DriverNo' not in r for r in records):
+            raise CalibrationSchemaError('invalid-position-record-schema')
+        # One compressed packet can contain several samples. Keep temporal order
+        # rather than discarding earlier valid samples in an unordered batch.
+        records.sort(key=lambda r:utc_ms(r.get('Utc')) if utc_ms(r.get('Utc')) is not None else -float('inf'))
         for r in records:
-            number=str(r['DriverNo']);time=utc_ms(r.get('Utc'))
+            number=str(r['DriverNo']);drivers.add(number);time=utc_ms(r.get('Utc'))
+            stats['driversRepresented']=len(drivers)
+            if time is None:stats['invalidTimestamps']+=1;continue
+            if time<=last.get(number,-float('inf')):stats['duplicateOrOlderRecords']+=1;continue
             timing=state.topics.get('TimingData',{}).get(number,{})
             sample={'driver':number,'time':time,'frameTime':clock,'x':r.get('X'),'y':r.get('Y'),
                     'lap':timing.get('NumberOfLaps'),'inPit':timing.get('InPit'),
                     'pitOut':timing.get('PitOut'),'status':r.get('Status')}
-            if time is None or time<=last.get(number,-1):continue
-            last[number]=time;samples.append(sample)
+            last[number]=time;samples.append(sample);stats['acceptedPositionRecords']+=1
             if len(samples)>MAX_SAMPLES:raise ValueError('Sample limit exceeded; use a shorter window')
+    stats.setdefault('driversRepresented',0)
     return samples
 
 
-def clean_laps(dataset):
+def clean_laps(dataset, diagnostics=None):
     groups={};reasons={'invalid':0,'stale':0,'offTrack':0,'noLap':0,'pitLaps':0,'incompleteLaps':0,'outliers':0}
     for p in dataset['samples']:
         values=[p.get(k) for k in ('x','y','time')]
@@ -72,11 +100,13 @@ def clean_laps(dataset):
         if lap is None or isinstance(lap,bool) or not str(lap).isdigit():reasons['noLap']+=1;continue
         key=f"{p.get('session',dataset.get('sessionPath','unknown'))}|{p['driver']}|{int(lap)}"
         groups.setdefault(key,[]).append(p)
+    details={'tooFewSamples':0,'invalidExtent':0,'duration':0,'gpsGap':0,'openLoop':0}
+    if diagnostics is not None:diagnostics.update(candidateLaps=len(groups),candidateDrivers=len({key.split('|')[-2] for key in groups}))
     laps=[]
     for key,rows in groups.items():
         rows=sorted({r['time']:r for r in rows}.values(),key=lambda r:r['time'])
         if any(r.get('inPit') is True or r.get('pitOut') is True for r in rows):reasons['pitLaps']+=1;continue
-        if len(rows)<45:reasons['incompleteLaps']+=1;continue
+        if len(rows)<45:reasons['incompleteLaps']+=1;details['tooFewSamples']+=1;continue
         points=np.array([[r['x'],r['y']] for r in rows]);times=np.array([r['time'] for r in rows])
         step=np.linalg.norm(np.diff(points,axis=0),axis=1)
         typical=np.median(step[step>0]) if np.any(step>0) else 0
@@ -89,10 +119,18 @@ def clean_laps(dataset):
         duration=(times[-1]-times[0])/1000
         # Refuse partial laps or large missing sections. No line is invented
         # through a pit lane or a long GPS outage to make calibration succeed.
-        if diagonal<=0 or not 40<=duration<=240 or np.max(np.diff(times))>2500 or np.linalg.norm(points[-1]-points[0])>diagonal*0.06:
-            reasons['incompleteLaps']+=1;continue
+        failed=[]
+        if diagonal<=0:failed.append('invalidExtent')
+        if not 40<=duration<=240:failed.append('duration')
+        if np.max(np.diff(times))>2500:failed.append('gpsGap')
+        if np.linalg.norm(points[-1]-points[0])>diagonal*0.06:failed.append('openLoop')
+        if failed:
+            reasons['incompleteLaps']+=1
+            for reason in failed:details[reason]+=1
+            continue
         points=resample(points)
         laps.append({'id':key,'points':points,'driver':rows[0]['driver'],'duration':duration})
+    if diagnostics is not None:diagnostics.update(acceptedCompleteLaps=len(laps),rejected=reasons,incompleteLapReasons=details,rejectionUnits={'invalid/stale/offTrack/noLap/outliers':'samples','pitLaps/incompleteLaps':'lap groups','incompleteLapReasons':'lap groups; a lap may fail several checks'})
     return laps,reasons
 
 

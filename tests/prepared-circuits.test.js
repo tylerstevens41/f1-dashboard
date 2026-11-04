@@ -46,3 +46,15 @@ test('preparation events cannot reset race state or animation samples; calculate
  const calculated={...base,startFinish:{at:.99,status:'provisional',calculated:true},sector1End:{at:.2,status:'provisional',calculated:true},sector2End:{at:.75,status:'provisional',calculated:true}};
  assert.equal(resolveBoundarySources({...base,sector1End:{at:.33,status:'verified'}},calculated).sector1End.at,.2);
 });
+
+test('preparation diagnostics show exception stages and lap counts in the development panel',async()=>{
+ const {createServer}=await import('vite');const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
+ const server=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom'});
+ try{
+  const {default:Panel}=await server.ssrLoadModule('/src/circuits/PreparationPanel.jsx');
+  const job={state:'failed',identity:{name:'Mexico City',year:2026},windowDiagnostics:[{offset:5400,status:'error',stage:'extract',archiveRetrieved:true,eventCount:120,positionMessages:50,decodedPositionRecords:400,driversRepresented:20,candidateLaps:null,acceptedCompleteLaps:null,calibrationAttempted:false,error:{exceptionType:'KeyError',stage:'extract',hint:'Inspect decoder/schema',location:{file:'calibrate.py',line:60,function:'collect_clip'}}},{offset:6000,status:'rejected',stage:'clean',archiveRetrieved:true,candidateLaps:10,acceptedCompleteLaps:2,reason:'insufficient-complete-laps',rejected:{incompleteLaps:8}}]};
+  const markup=renderToStaticMarkup(createElement(Panel,{job,onPrepare:()=>{}}));
+  assert.match(markup,/Window 5400s/);assert.match(markup,/KeyError/);assert.match(markup,/calibrate.py:60/);
+  assert.match(markup,/Candidate laps 10/);assert.match(markup,/complete accepted 2/);assert.match(markup,/insufficient-complete-laps/);
+ }finally{await server.close();}
+});

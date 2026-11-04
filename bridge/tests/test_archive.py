@@ -34,6 +34,21 @@ class ArchiveTests(unittest.TestCase):
             with patch('bridge.archive.small_json',side_effect=AssertionError('network should not be used')):
                 self.assertEqual(fetch_clip('2024/Test/Race/',10,5,cache)['events'],clip['events'])
 
+    def test_geometry_topics_skip_unrelated_streams_and_have_separate_cache(self):
+        topics=['SessionInfo','TimingData','Position.z']
+        feeds={t:{'StreamPath':t+'.jsonStream'} for t in (*topics,'CarData.z')}
+        def stream(path,budget):
+            if 'CarData.z' in path:raise RuntimeError('Unrelated telemetry must not be downloaded for geometry')
+            if 'SessionInfo' in path:yield '00:00:01.000'+json.dumps({'Key':1})
+        with tempfile.TemporaryDirectory() as cache,patch('bridge.archive.small_json',return_value={'Feeds':feeds}),patch('bridge.archive.lines',side_effect=stream):
+            clip=fetch_clip('2026/Unit/',0,5,cache,topics=topics)
+            self.assertNotIn('CarData.z',clip['capabilities'])
+            self.assertEqual(len(list(Path(cache).glob('*.json.gz'))),1)
+            with self.assertRaisesRegex(RuntimeError,'Unrelated telemetry'):
+                fetch_clip('2026/Unit/',0,5,cache)
+            with patch('bridge.archive.lines',side_effect=AssertionError('Cached geometry should not fetch again')):
+                self.assertEqual(fetch_clip('2026/Unit/',0,5,cache,topics=topics)['events'],clip['events'])
+
     def test_recording_round_trip_and_rejects_non_livef1(self):
         clip={'format':'livef1-clip-v1','source':'LiveF1','durationMs':1000,'originMs':0,'initial':{},'events':[]}
         with tempfile.TemporaryDirectory() as directory:

@@ -195,7 +195,15 @@ class AssetStore:
         return bundle
 
     def progress(self, meta, **value):
-        record = {'identity': meta, 'updatedAt': time.time(), **value}
+        previous = self.directory(meta['assetKey']) / 'job.json'
+        retained = {}
+        if previous.exists():
+            try:
+                old=read_json(previous)
+                retained={k:old[k] for k in ('windowDiagnostics',) if k in old}
+            except (ValueError,OSError):
+                pass
+        record = {'identity': meta, 'updatedAt': time.time(), **retained, **value}
         atomic_json(self.directory(meta['assetKey']) / 'job.json', record)
         return record
 
@@ -234,22 +242,62 @@ def prune_cache(root, limit=128*1024*1024):
 
 
 def collect_geometry(meta, cache, report, windows=(5400, 6000, 3600)):
+    from collections import Counter
+    import numpy as np
     from .archive import fetch_clip
     from .calibrate import collect_clip, clean_laps, build, read_json as read_samples, write_json
+    from .diagnostics import safe_exception
+    from .protocol import TOPICS
     cache = Path(cache)
     cache.mkdir(parents=True, exist_ok=True)
-    failures = []
+    attempts = []
+    diagnostic_file = cache.parent / meta['assetKey'] / 'geometry-diagnostics.json'
+
+    def publish():
+        payload = {'schema':'circuit-geometry-diagnostics-v1','circuitKey':meta['circuitKey'],
+                   'year':meta['year'],'layoutVersion':meta['layoutVersion'],'windows':attempts}
+        atomic_json(diagnostic_file, payload)
+        report(stage='collecting', state='preparing', windowStart=attempts[-1]['offset'], windowDiagnostics=attempts)
+
     for offset in windows:
+        diagnostic = {'offset':offset,'durationSeconds':480,'stage':'cache','status':'running',
+                      'sampleCacheHit':False,'archiveRetrieved':None,'eventCount':None,
+                      'positionMessages':None,'decodedPositionRecords':None,'driversRepresented':None,
+                      'candidateLaps':None,'acceptedCompleteLaps':None,'calibrationAttempted':False}
+        attempts.append(diagnostic)
         try:
-            report(stage='collecting', state='preparing', windowStart=offset)
-            token = hashlib.sha256(f"{meta['path']}:{offset}:480".encode()).hexdigest()
+            publish()
+            token = hashlib.sha256(f"{meta['path']}:{offset}:480:extraction-v2".encode()).hexdigest()
             file = cache / f'{token}.json.gz'
+            diagnostic['sampleCacheEntry']=file.name
             if file.exists():
                 data = read_samples(file)
+                diagnostic.update(data.get('collectionDiagnostics',{}))
+                diagnostic['sampleCacheHit'] = True
             else:
-                clip = fetch_clip(meta['path'], offset, 480)
-                data = {'schema': 'livef1-calibration-samples-v1', 'source': 'LiveF1', 'circuitId': meta['id'],
-                        'sessionPath': meta['path'], 'sessionPaths': [meta['path']], 'samples': collect_clip(clip)}
+                diagnostic['stage']='archive'
+                retrieval={}
+                try:
+                    clip = fetch_clip(meta['path'], offset, 480, topics=('SessionInfo','TimingData','Position.z'),diagnostics=retrieval)
+                finally:
+                    diagnostic.update(retrieval)
+                diagnostic['archiveRetrieved']=True
+                if not isinstance(clip,dict) or not isinstance(clip.get('events'),list):
+                    raise PreparationError('Unexpected archive clip schema; inspect archive/extraction stage')
+                diagnostic['eventCount']=len(clip['events'])
+                diagnostic['topicEvents']={t:n for t,n in Counter(e.get('topic') for e in clip['events'] if isinstance(e,dict)).items() if t in TOPICS}
+                allowed={'available','no-events-in-window','missing','missing-stream','parse-error','static-metadata-only'}
+                diagnostic['capabilities']={t:v for t,v in clip.get('capabilities',{}).items() if t in TOPICS and v in allowed}
+                diagnostic['clockBasis']=clip.get('clockBasis') if clip.get('clockBasis') in ('gps-utc','relative','receipt-utc') else 'unknown'
+                diagnostic['stage']='extract'
+                extraction={}
+                try:
+                    samples=collect_clip(clip, diagnostics=extraction)
+                finally:
+                    diagnostic.update(extraction)
+                data = {'schema':'livef1-calibration-samples-v1','source':'LiveF1','circuitId':meta['id'],
+                        'sessionPath':meta['path'],'sessionPaths':[meta['path']],'samples':samples, 'synthetic':bool(clip.get('synthetic',False))}
+                diagnostic['stage']='identity'
                 info = clip['initial'].get('SessionInfo', {})
                 for event in clip['events']:
                     if event['topic'] == 'SessionInfo':
@@ -257,39 +305,68 @@ def collect_geometry(meta, cache, report, windows=(5400, 6000, 3600)):
                         info = merge(info, event['payload'])
                 if str(info.get('Meeting', {}).get('Circuit', {}).get('Key')) != meta['circuitKey']:
                     raise PreparationError('Archive GPS circuit identity mismatch')
+                data['collectionDiagnostics']=dict(diagnostic)
+                diagnostic['stage']='cache'
                 write_json(file, data)
+            if data.get('schema')!='livef1-calibration-samples-v1' or data.get('source')!='LiveF1' or not isinstance(data.get('samples'),list):
+                raise PreparationError('Unexpected cached GPS sample schema')
             if data.get('circuitId') != meta['id'] or data.get('sessionPath') != meta['path']:
                 raise PreparationError('Cached GPS source identity mismatch')
-            laps, rejected = clean_laps(data)
-            if len(laps) < 3:
-                failures.append({'offset': offset, 'completeLaps': len(laps), 'rejected': rejected})
+            diagnostic['sampleCount']=len(data['samples'])
+            diagnostic['driversRepresented']=len({p.get('driver') for p in data['samples'] if isinstance(p,dict) and p.get('driver') is not None})
+            skews=[p['time']-p['frameTime'] for p in data['samples'] if isinstance(p,dict) and all(isinstance(p.get(k),(int,float)) and np.isfinite(p[k]) for k in ('time','frameTime'))]
+            diagnostic['sampleClockSkewMs']={'median':float(np.median(skews)),'absoluteP95':float(np.percentile(np.abs(skews),95))} if skews else None
+            diagnostic['stage']='clean'
+            cleaning={}
+            try:
+                laps, rejected = clean_laps(data, diagnostics=cleaning)
+            finally:
+                diagnostic.update(cleaning)
+            if not data['samples']:
+                diagnostic.update(status='rejected',reason='no-position-samples')
                 continue
-            report(stage='geometry', state='preparing')
-            import numpy as np
+            if len(laps) < 3:
+                diagnostic.update(status='rejected',reason='insufficient-complete-laps',requiredCompleteLaps=3)
+                continue
+            report(stage='geometry', state='preparing', windowStart=offset, windowDiagnostics=attempts)
+            diagnostic['stage']='build'
             areas = [float(np.sum(lap['points'][:,0]*np.roll(lap['points'][:,1],-1)-np.roll(lap['points'][:,0],-1)*lap['points'][:,1])) for lap in laps]
             if any(abs(area)<1e-6 for area in areas) or len({bool(area>0) for area in areas}) != 1:
-                failures.append({'offset':offset,'reason':'inconsistent driving direction or degenerate loop'})
+                diagnostic.update(status='rejected',reason='inconsistent-driving-direction-or-degenerate-loop')
                 continue
+            diagnostic['calibrationAttempted']=True
             result = build(data, layout=meta['layoutVersion'])
-            if not result['validation']['automaticChecksPassed']:
-                failures.append({'offset': offset, 'reason': 'held-out geometry error'})
+            checks=result['validation']
+            diagnostic['calibration']={k:checks.get(k) for k in ('automaticChecksPassed','heldOut','thresholdFractionOfDiagonal','lapCount','driverCount')}
+            if not checks['automaticChecksPassed']:
+                diagnostic.update(status='rejected',reason='held-out-geometry-error')
                 continue
-            # Retain a diagnostic failure, not a manufactured outline, if the
-            # sampled lap has an unreasonably long spatial jump after resampling.
             xy = np.array([[p['x'], p['y']] for p in result['geometry']['points']])
-            if np.max(np.linalg.norm(np.diff(xy, axis=0), axis=1)) > np.linalg.norm(np.ptp(xy, axis=0))*.04:
-                failures.append({'offset': offset, 'reason': 'incomplete spatial coverage'})
+            ratio=float(np.max(np.linalg.norm(np.diff(xy, axis=0), axis=1))/np.linalg.norm(np.ptp(xy, axis=0)))
+            diagnostic['maximumSpatialStepFractionOfExtent']=ratio
+            if not np.isfinite(ratio) or ratio>.04:
+                diagnostic.update(status='rejected',reason='incomplete-spatial-coverage')
                 continue
+            diagnostic.update(stage='geometry',status='accepted')
             result.pop('debug', None)
             result['provenance']['preparationWindowSeconds'] = offset
+            result['validation']['preparationDiagnostics']={'windows':attempts}
             return result
-        except PreparationError:
-            raise
-        except Exception:
-            failures.append({'offset': offset, 'reason': 'source unavailable or insufficient complete on-track laps'})
+        except Exception as exc:
+            diagnostic['status']='error'
+            if diagnostic['stage']=='archive' and diagnostic['archiveRetrieved'] is not True:diagnostic['archiveRetrieved']=False
+            diagnostic['error']=safe_exception(exc,diagnostic['stage'])
+            # These exact coordinator-generated messages are safe; arbitrary
+            # ValueError/upstream messages are deliberately never forwarded.
+            if isinstance(exc,PreparationError) and str(exc) in (
+                'Unexpected archive clip schema; inspect archive/extraction stage',
+                'Archive GPS circuit identity mismatch','Cached GPS source identity mismatch',
+                'Unexpected cached GPS sample schema'):
+                diagnostic['error']['detail']=str(exc)
         finally:
+            publish()
             prune_cache(cache)
-    raise PreparationError(f'No reliable geometry in {len(windows)} bounded windows. Try another session or --windows. Diagnostics: {failures}')
+    raise PreparationError(f'No reliable geometry in {len(windows)} bounded windows. See geometry-diagnostics.json and per-window stage/error/rejection details; no quality thresholds were relaxed.')
 
 
 def fast_python():

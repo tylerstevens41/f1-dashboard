@@ -114,6 +114,32 @@ class GeometryDiagnosticTests(unittest.TestCase):
         self.assertEqual(stats['duplicateOrOlderRecords'],0);self.assertEqual(stats['ignoredMessages'],1)
         self.assertEqual(sorted(p['time'] for p in samples),[p['time'] for p in samples])
 
+    def test_observed_no_events_gap_schedules_bounded_measured_window_then_succeeds(self):
+        meta=identity(session());calls=[]
+        def retrieve(path,offset,duration,**options):
+            calls.append(offset)
+            if offset==5400:
+                options['diagnostics'].update(archiveFirstOffsetSeconds={'Position.z':616.289},
+                    archiveFirstAfterWindowSeconds={'Position.z':90000},archiveLastOffsetSeconds={'Position.z':90000})
+                raise ArchiveUnavailable('No events',code='no-events')
+            return {'synthetic':True,'originMs':0,'initial':{'SessionInfo':{'Meeting':{'Circuit':{'Key':65}}}},'events':[]}
+        with tempfile.TemporaryDirectory() as root,patch('bridge.archive.fetch_clip',side_effect=retrieve),patch('bridge.calibrate.collect_clip',return_value=dataset()['samples']):
+            result=collect_geometry(meta,Path(root)/'gps-cache',lambda **_:None,windows=(5400,))
+            report=json.loads((Path(root)/meta['assetKey']/'geometry-diagnostics.json').read_text())
+        self.assertEqual(calls,[5400,90000]);self.assertTrue(result['provenance']['synthetic'])
+        self.assertEqual(report['windows'][1]['windowSource'],'observed-gps-after-requested-window')
+        self.assertEqual(result['provenance']['preparationWindowSeconds'],90000)
+
+    def test_discovery_never_guesses_without_measured_coverage_and_has_retry_limit(self):
+        meta=identity(session());calls=[]
+        def retrieve(path,offset,duration,**options):
+            calls.append(offset)
+            options['diagnostics'].update(archiveFirstAfterWindowSeconds={'Position.z':offset+10000})
+            raise ArchiveUnavailable('No events',code='no-events')
+        with tempfile.TemporaryDirectory() as root,patch('bridge.archive.fetch_clip',side_effect=retrieve):
+            with self.assertRaises(PreparationError):collect_geometry(meta,Path(root)/'gps-cache',lambda **_:None,windows=(5400,))
+        self.assertEqual(calls,[5400,15400,25400])
+
     def test_decoder_missing_timestamps_and_unexpected_records_are_counted_or_categorized(self):
         import livef1.data_processing.etl as etl
         clip={'originMs':0,'initial':{},'events':[{'topic':'Position.z','offsetMs':0,'payload':'fixture'}]}

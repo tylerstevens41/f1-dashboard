@@ -251,6 +251,8 @@ def collect_geometry(meta, cache, report, windows=(5400, 6000, 3600)):
     cache = Path(cache)
     cache.mkdir(parents=True, exist_ok=True)
     attempts = []
+    pending=list(windows)
+    discovered={}
     diagnostic_file = cache.parent / meta['assetKey'] / 'geometry-diagnostics.json'
 
     def publish():
@@ -259,11 +261,12 @@ def collect_geometry(meta, cache, report, windows=(5400, 6000, 3600)):
         atomic_json(diagnostic_file, payload)
         report(stage='collecting', state='preparing', windowStart=attempts[-1]['offset'], windowDiagnostics=attempts)
 
-    for offset in windows:
+    for offset in pending:
         diagnostic = {'offset':offset,'durationSeconds':480,'stage':'cache','status':'running',
                       'sampleCacheHit':False,'archiveRetrieved':None,'eventCount':None,
                       'positionMessages':None,'decodedPositionRecords':None,'driversRepresented':None,
                       'candidateLaps':None,'acceptedCompleteLaps':None,'calibrationAttempted':False}
+        diagnostic['windowSource']=discovered.get(offset,'requested')
         attempts.append(diagnostic)
         try:
             publish()
@@ -356,6 +359,23 @@ def collect_geometry(meta, cache, report, windows=(5400, 6000, 3600)):
             diagnostic['status']='error'
             if diagnostic['stage']=='archive' and diagnostic['archiveRetrieved'] is not True:diagnostic['archiveRetrieved']=False
             diagnostic['error']=safe_exception(exc,diagnostic['stage'])
+            # Only no-events responses with observed GPS coverage can suggest a
+            # different source-clock window. Never rebase or shift timestamps.
+            if diagnostic['stage']=='archive' and getattr(exc,'code',None)=='no-events' and len(discovered)<2:
+                from .archive import MAX_START_SECONDS
+                first=diagnostic.get('archiveFirstOffsetSeconds',{}).get('Position.z')
+                after=diagnostic.get('archiveFirstAfterWindowSeconds',{}).get('Position.z')
+                last=diagnostic.get('archiveLastOffsetSeconds',{}).get('Position.z')
+                candidate=None
+                reason=None
+                if isinstance(after,(int,float)) and np.isfinite(after):
+                    candidate=int(np.floor(after));reason='observed-gps-after-requested-window'
+                elif all(isinstance(v,(int,float)) and np.isfinite(v) for v in (first,last)) and last-first>=480:
+                    candidate=max(int(np.floor(first)),int(np.floor(last-480)));reason='observed-gps-ends-before-requested-window'
+                if candidate is not None and 0<=candidate<=MAX_START_SECONDS and candidate not in pending:
+                    pending.append(candidate);discovered[candidate]=reason
+                    diagnostic['discoveredWindow']={'offset':candidate,'reason':reason,'source':'measured Position.z elapsed coverage; timestamps unchanged'}
+
             # These exact coordinator-generated messages are safe; arbitrary
             # ValueError/upstream messages are deliberately never forwarded.
             if isinstance(exc,PreparationError) and str(exc) in (
@@ -366,7 +386,7 @@ def collect_geometry(meta, cache, report, windows=(5400, 6000, 3600)):
         finally:
             publish()
             prune_cache(cache)
-    raise PreparationError(f'No reliable geometry in {len(windows)} bounded windows. See geometry-diagnostics.json and per-window stage/error/rejection details; no quality thresholds were relaxed.')
+    raise PreparationError(f'No reliable geometry in {len(attempts)} bounded windows. See geometry-diagnostics.json and per-window stage/error/rejection details; no quality thresholds were relaxed.')
 
 
 def fast_python():
@@ -470,8 +490,8 @@ def main():
     parser.add_argument('--store', default=str(DEFAULT_STORE))
     parser.add_argument('--login', action='store_true')
     args = parser.parse_args()
-    if len(args.windows) > 5 or any(x < 0 or x > 14400 for x in args.windows):
-        parser.error('Use 1–5 offsets between 0 and 14400 seconds')
+    if len(args.windows) > 5 or any(x < 0 or x > 604800 for x in args.windows):
+        parser.error('Use 1–5 source offsets between 0 and 604800 seconds')
     if not args.batch and not args.event:
         parser.error('Choose --event or --batch')
     try:

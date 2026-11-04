@@ -15,6 +15,7 @@ BASE = 'https://livetiming.formula1.com/static/'
 MAX_BYTES = 64 * 1024 * 1024
 CACHE_BYTES = 128 * 1024 * 1024
 MAX_SECONDS = 600
+MAX_START_SECONDS = 7 * 86400  # Source elapsed clocks can include day prefixes.
 
 
 class ArchiveUnavailable(RuntimeError):
@@ -177,8 +178,8 @@ def prune_cache(cache):
 def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/livef1', topics=None, diagnostics=None):
     stats=diagnostics if diagnostics is not None else {}
     stats.update(archiveCacheHit=False,archiveBytesRead=0,archivePartialEventCount=0)
-    if not 0 <= start_seconds <= 4 * 3600 or not 1 <= duration_seconds <= MAX_SECONDS:
-        raise ValueError('Start must be 0–14400 seconds, duration 1–600 seconds')
+    if not 0 <= start_seconds <= MAX_START_SECONDS or not 1 <= duration_seconds <= MAX_SECONDS:
+        raise ValueError('Start must be 0–604800 source seconds, duration 1–600 seconds')
     safe_url(path)
     if not path.endswith('/'):
         raise ValueError('Select a session directory from the archive list')
@@ -193,6 +194,7 @@ def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/li
         clip = load_recording(target)
         target.touch()
         stats.update(archiveCacheHit=True,archivePartialEventCount=len(clip['events']))
+        stats.update(clip.get('diagnostics',{}).get('coverage',{}))
         return clip
     feeds = small_json(path + 'Index.json').get('Feeds', {})
     start = start_seconds * 1000
@@ -231,7 +233,11 @@ def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/li
             for line in lines(urljoin(path, stream), budget):
                 offset, payload_text = split_stream_record(line)
                 stats.setdefault('archiveFirstOffsetSeconds',{}).setdefault(topic,offset/1000)
+                stats.setdefault('archiveLastOffsetSeconds',{})[topic]=offset/1000
+                counts=stats.setdefault('archiveWindowCounts',{}).setdefault(topic,{'before':0,'inside':0,'after':0})
+                counts['before' if offset<start else 'after' if offset>end else 'inside']+=1
                 if offset > end:
+                    stats.setdefault('archiveFirstAfterWindowSeconds',{})[topic]=offset/1000
                     break
                 payload = json.loads(payload_text)
                 if topic == 'Position.z' and origin is None:
@@ -272,7 +278,7 @@ def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/li
     clip = {'format': 'livef1-clip-v1', 'source': 'LiveF1', 'sessionPath': path,
             'startOffsetSeconds': start_seconds, 'durationMs': duration_seconds * 1000, 'originMs': origin + start,
             'capabilities': capabilities, 'initial': initial, 'events': events,
-            'diagnostics': {'topicErrors':topic_diagnostics},
+            'diagnostics': {'topicErrors':topic_diagnostics,'coverage':{k:stats.get(k,{}) for k in ('archiveFirstOffsetSeconds','archiveLastOffsetSeconds','archiveFirstAfterWindowSeconds','archiveWindowCounts')}},
             'initialFreshness': {topic: origin + offset for topic, offset in seed.freshness.items()},
             'capturedAt': time.time(), 'clockBasis': 'gps-utc' if origin else 'relative'}
     save_clip(target, validate_clip(clip))

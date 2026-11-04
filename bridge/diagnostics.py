@@ -4,7 +4,7 @@ import re
 
 BRIDGE = Path(__file__).resolve().parent
 HINTS = {
-    'archive': 'Inspect archiveTopicErrors and formatKind: parsing failure is distinct from missing GPS or lap rejection. HTML/markup may be a login, security or routing response; do not share raw response bodies.',
+    'archive': 'For no-events inspect archiveWindowCounts, archiveLastOffsetSeconds and archiveFirstAfterWindowSeconds. For parse errors inspect archiveTopicErrors/formatKind. Do not share raw response bodies.',
     'extract': 'Check Position.z decoder/schema and session-clock diagnostics; timing messages are required for lap grouping.',
     'clean': 'Inspect sample/lap rejection counts and timestamps before changing quality thresholds.',
     'build': 'Inspect calibration checks and repository exception location; do not force a closed outline.',

@@ -116,6 +116,28 @@ class ArchiveTests(unittest.TestCase):
                 self.assertNotIn('private',json.dumps(diagnostics))
                 self.assertEqual(list(Path(cache).glob('*')),[])
 
+    def test_empty_window_reports_observed_gap_and_day_clock_without_rebasing(self):
+        topics=('SessionInfo','TimingData','Position.z')
+        feeds={t:{'StreamPath':t+'.jsonStream'} for t in topics}
+        def stream(path,budget):
+            if 'SessionInfo' in path:yield '0.00:00:00.000'+json.dumps({'Key':1})
+            elif 'TimingData' in path:
+                yield '0.00:10:16.721'+json.dumps({'Lines':{}})
+                yield '1.01:00:00.000'+json.dumps({'Lines':{}})
+            else:
+                yield '0.00:10:16.289'+json.dumps('fixture')
+                yield '1.01:00:00.000'+json.dumps('fixture')
+        decoded={'1':{'DriverNo':'1','Utc':'2026-11-01T20:00:00Z','X':1,'Y':2}}
+        with tempfile.TemporaryDirectory() as cache,patch('bridge.archive.small_json',return_value={'Feeds':feeds}),patch('bridge.archive.lines',side_effect=stream),patch('bridge.archive.decode',return_value=decoded),patch('bridge.protocol.decode',return_value=decoded):
+            stats={}
+            with self.assertRaises(ArchiveUnavailable) as error:
+                fetch_clip('2026/Unit/',5400,480,cache,topics=topics,diagnostics=stats)
+            self.assertEqual(error.exception.code,'no-events')
+            self.assertEqual(stats['archiveFirstAfterWindowSeconds']['Position.z'],90000)
+            self.assertEqual(stats['archiveLastOffsetSeconds']['Position.z'],90000)
+            self.assertEqual(stats['archiveWindowCounts']['Position.z'],{'before':1,'inside':0,'after':1})
+            self.assertEqual(stats['archiveTopicErrors'],{})
+
     def test_recording_round_trip_and_rejects_non_livef1(self):
         clip={'format':'livef1-clip-v1','source':'LiveF1','durationMs':1000,'originMs':0,'initial':{},'events':[]}
         with tempfile.TemporaryDirectory() as directory:

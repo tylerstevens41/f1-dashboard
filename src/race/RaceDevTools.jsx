@@ -28,7 +28,7 @@ export default function RaceDevTools({ feed, circuit }) {
       <button onClick={() => send({ action: 'sessions', year })}>List sessions</button>
       <select aria-label="Historical LiveF1 session" value={path} onChange={e => {setPath(e.target.value);if(e.target.value)send({action:'circuit-lookup',year,path:e.target.value});}}><option value="">Select real session</option>{sessions.map(s => <option key={s.path} value={s.path}>{s.label}</option>)}</select>
       <PreparationPanel job={feed.circuitJobs[path]} disabled={!path} onPrepare={()=>send({action:'circuit-prepare',year,path})}/>
-      <label>Start offset (s) <input type="number" min="0" max="14400" value={start} onChange={e => setStart(Number(e.target.value))} /></label>
+      <label>Start offset (s) <input type="number" min="0" max="604800" value={start} onChange={e => setStart(Number(e.target.value))} /></label>
       <label>Clip length (s) <input type="number" min="1" max="600" value={duration} onChange={e => setDuration(Number(e.target.value))} /></label>
       <p style={{flexBasis:'100%'}}>Start offset counts seconds from the archive stream origin, not race lights-out. Clip length is the bounded window to load (maximum 600 s). For calibration try a 480 s window, then inspect on-track coverage.</p>
       <button disabled={!path} onClick={() => send({ action: 'load', path, start, duration })}>Load TEST clip</button>

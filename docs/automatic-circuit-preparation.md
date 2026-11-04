@@ -206,3 +206,20 @@ The subsequent real diagnostic mask was `9.99:99:99.999` immediately followed by
 Tests reproduce the reported shape for metadata, seeded timing and compressed-position payload framing at offset 5400, plus nonzero days and midnight rollover. First parsed source offsets per topic are now included as `archiveFirstOffsetSeconds`, so any genuine window/origin issue can be distinguished next. The full authenticated Mexico reconstruction still needs the local rerun; this fixes the demonstrated framing mismatch, not a claim that all subsequent geometry checks have passed.
 
 No cache deletion or dependency changes are needed. Pull the update and repeat the one-window Mexico command above. If parsing succeeds, diagnostics should advance to extraction/cleaning/build with real counts instead of all topics reporting `invalid-stream-format`.
+
+### Readable streams but no events inside the requested window
+
+A subsequent Mexico report had all three topics `available`, no parse errors, first timing/GPS records near 616 seconds, and zero events inside 5400–5880. This proves the reader did not find records in that window, but first offsets alone do not establish whether the stream ended earlier or jumped to a later source time.
+
+Coverage diagnostics now include `archiveLastOffsetSeconds`, `archiveFirstAfterWindowSeconds` and per-topic `archiveWindowCounts` (`before`, `inside`, `after`). The last offset is the last **examined** timestamp, not a claim of the full stream's end if the reader stopped at the first record beyond the window.
+
+For a no-events failure only, preparation can schedule up to **two additional measured windows**:
+
+- If a Position.z record was observed beyond the requested end, try the window beginning at that observed source second (floored so the record is included).
+- If the Position.z stream ended before the requested start and the observed span is at least 480 seconds, try its final 480-second window.
+
+Every discovered attempt is labelled `windowSource`, and its predecessor records `discoveredWindow` with the measured reason. No coordinates or timestamps are fabricated/rebased. Authentication, parsing, invalid geometry and other failures do not trigger guessed-window retries. Existing byte limits, 480-second clip bounds and geometry checks remain. Source offsets now support up to seven days to allow actual day-prefixed clocks; this does not authorize downloading seven days of data. The reader still stops at the window end or the download byte limit.
+
+Pull and rerun the same one-window command. Preparation will use the observed coverage to attempt bounded alternatives automatically when supported. If it still fails, the same sanitized report now contains the coverage and any discovered attempts; no need to manually guess more offsets.
+
+If geometry is prepared at a different source offset, use `provenance.preparationWindowSeconds` from the calibration or the accepted window's `offset` in this report when loading a historical TEST clip. The TEST offset input accepts day-prefixed source ranges as numeric seconds. Preparation does not automatically change or restart playback.

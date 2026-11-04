@@ -253,6 +253,7 @@ def collect_geometry(meta, cache, report, windows=(5400, 6000, 3600)):
     attempts = []
     pending=list(windows)
     discovered={}
+    usable_scan_attempted=False
     diagnostic_file = cache.parent / meta['assetKey'] / 'geometry-diagnostics.json'
 
     def publish():
@@ -277,6 +278,7 @@ def collect_geometry(meta, cache, report, windows=(5400, 6000, 3600)):
                 data = read_samples(file)
                 diagnostic.update(data.get('collectionDiagnostics',{}))
                 diagnostic['sampleCacheHit'] = True
+                diagnostic['windowSource']=discovered.get(offset,'requested')
             else:
                 diagnostic['stage']='archive'
                 retrieval={}
@@ -331,6 +333,22 @@ def collect_geometry(meta, cache, report, windows=(5400, 6000, 3600)):
             if len(laps) < 3:
                 reason='no-valid-position-samples' if rejected['invalid']==len(data['samples']) else 'insufficient-complete-laps'
                 diagnostic.update(status='rejected',reason=reason,requiredCompleteLaps=3)
+                # All-zero/missing-lap windows are not usable race footage. Scan
+                # once for measured timing + moving GPS, not arbitrary offsets.
+                zero_only=diagnostic.get('invalidSampleReasons',{}).get('zeroCoordinates')==len(data['samples'])
+                no_laps=diagnostic.get('lapNumberAvailability',{}).get('usable')==0
+                if (zero_only or no_laps) and not usable_scan_attempted and len(discovered)<2:
+                    usable_scan_attempted=True
+                    from .window_scan import find_usable_window
+                    scan={};diagnostic['usableWindowScan']=scan
+                    publish()
+                    try:
+                        candidate=find_usable_window(meta['path'],offset+480,scan,on_progress=publish)
+                        if candidate not in pending:
+                            pending.append(candidate);discovered[candidate]='measured-lap-timing-and-moving-gps'
+                            diagnostic['discoveredWindow']={'offset':candidate,'reason':discovered[candidate],'source':'bounded source scan; original source timestamps preserved'}
+                    except Exception as exc:
+                        scan['error']=safe_exception(exc,'archive')
                 continue
             report(stage='geometry', state='preparing', windowStart=offset, windowDiagnostics=attempts)
             diagnostic['stage']='build'

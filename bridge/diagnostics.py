@@ -19,7 +19,7 @@ def safe_exception(exc, stage):
     result = {'exceptionType': name, 'stage': stage, 'messageSuppressed': True,
               'hint': HINTS.get(stage, 'Inspect local dependency installation and job diagnostics; no raw upstream error was exported.')}
     code = getattr(exc, 'code', None)
-    if code in {'authentication-required','topic-unpublished','archive-http-error','download-limit','no-events','record-limit','invalid-clip-schema','invalid-event-schema','invalid-position-record-schema','invalid-stream-format'}:
+    if code in {'authentication-required','topic-unpublished','archive-http-error','download-limit','no-events','record-limit','invalid-clip-schema','invalid-event-schema','invalid-position-record-schema','invalid-stream-format','scan-limit','missing-required-stream','invalid-timing-schema','no-lap-timing-in-bounded-source','no-moving-gps-in-bounded-source'}:
         result['code'] = code
     if getattr(exc,'formatKind',None) in {'html-or-markup','json-without-elapsed-prefix','quoted-without-elapsed-prefix','unsupported-prefix'}:
         result['formatKind']=exc.formatKind

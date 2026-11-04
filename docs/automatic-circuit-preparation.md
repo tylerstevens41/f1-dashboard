@@ -238,3 +238,21 @@ git pull --ff-only origin feat/automatic-circuit-preparation
 ```
 
 That filename is the `sampleCacheEntry` in the supplied report. Use your configured store path if it differs. Share the count-only output. For a normal preparation rerun, the same counters are also included in geometry-diagnostics.json, using the sample cache when available. Real Mexico's invalid-value cause remains pending this inspection; do not assume the coordinates are zero or change timing/calibration to compensate.
+
+### Confirmed zero-GPS/missing-lap Mexico window
+
+The local inspection confirmed **all 40,370 records have integer X=0, Y=0, and no lap number**. This is real placeholder/unusable data in the selected window; the evidence does not prove whether later race data is usable or unavailable. Treating those samples as a circuit would fabricate geometry.
+
+After an all-zero or missing-lap window, preparation now performs **one bounded source scan** within the same selected session. It first looks for positive lap numbers for at least three drivers in TimingData, then for timestamped, finite, nonzero on-track coordinates with observed movement for at least three of those drivers. It selects the actual observed source offset as a candidate. The ordinary 480-second collection and full geometry validation still have to succeed afterward; discovery is not verification.
+
+The scan has the archive's shared 64 MiB source-byte cap, a 200,000-message cap and a 120-second processing deadline checked between records (an outstanding network read remains subject to its existing timeout). It does not store an entire session/season. Count-only scan progress/errors appear under `usableWindowScan`, with `timedDrivers`, `movingDrivers`, bytes and rejection counts. No actual driver positions are exported. If lap timing or moving GPS cannot be found within those limits, the scan reports that limitation rather than constructing an outline. At most two additional discovered windows are still permitted, and this usable-data scan runs at most once per preparation job.
+
+Reuse the cached invalid window and let the new scan find a measured candidate:
+
+```powershell
+git pull --ff-only origin feat/automatic-circuit-preparation
+.\.venv\Scripts\python.exe -m bridge.preparation --year 2026 --event Mexico --session Race --windows 92876 --login
+Get-Content .\circuit-assets\circuit-65-2026\geometry-diagnostics.json -Raw
+```
+
+Do not delete the cached sample file or lower the zero-coordinate/lap requirements. A successful synthetic regression now reproduces the zero/missing-lap window followed by a later candidate and normal geometry build, but real Mexico discovery and final alignment remain locally unverified.

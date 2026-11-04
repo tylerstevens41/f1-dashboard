@@ -33,7 +33,7 @@ class GeometryDiagnosticTests(unittest.TestCase):
                 return samples
             output=None
             def actual_build(*a,**k):return build(*a,**k)
-            with patch('bridge.archive.fetch_clip',side_effect=fetch if isinstance(fetch,Exception) else None,return_value=fetch if isinstance(fetch,dict) else clip),patch('bridge.calibrate.collect_clip',side_effect=collector),patch('bridge.calibrate.build',side_effect=build_error or (lambda *a,**k:build_result if build_result is not None else actual_build(*a,**k))):
+            with patch('bridge.archive.fetch_clip',side_effect=fetch if isinstance(fetch,Exception) else None,return_value=fetch if isinstance(fetch,dict) else clip),patch('bridge.calibrate.collect_clip',side_effect=collector),patch('bridge.calibrate.build',side_effect=build_error or (lambda *a,**k:build_result if build_result is not None else actual_build(*a,**k))),patch('bridge.window_scan.find_usable_window',side_effect=ValueError('fixture scan unavailable')):
                 try:
                     output=collect_geometry(meta,cache,lambda **_:None,windows=(1,))
                 except PreparationError:

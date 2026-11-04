@@ -58,6 +58,38 @@ class ArchiveTests(unittest.TestCase):
         for bad in ('00:60:00','00:00:60','nan','-1:00:00'):
             with self.assertRaises(ValueError):elapsed_ms(bad)
 
+    def test_dotnet_day_prefix_preserves_elapsed_time_and_wraparound(self):
+        from bridge.archive import split_stream_record
+        cases={'0.01:30:00.000':5400000,'1.00:00:00.000':86400000,
+               '1.02:03:04.1234567':93784123.4567,'12.23:59:59.999':1123199999}
+        for prefix,expected in cases.items():
+            offset,text=split_stream_record(prefix+'"compressed-position-fixture"')
+            self.assertAlmostEqual(offset,expected,places=3)
+            self.assertEqual(json.loads(text),'compressed-position-fixture')
+        self.assertAlmostEqual(elapsed_ms('1.00:00:00.000')-elapsed_ms('0.23:59:59.999'),1)
+        with self.assertRaises(ValueError):elapsed_ms('1.24:00:00.000')
+
+    def test_reported_day_prefix_shape_loads_actual_window_and_seeds_timing(self):
+        topics=('SessionInfo','TimingData','Position.z')
+        feeds={t:{'StreamPath':t+'.jsonStream'} for t in topics}
+        def stream(path,budget):
+            if 'SessionInfo' in path:
+                yield '0.00:00:00.000'+json.dumps({'Key':1})
+            elif 'TimingData' in path:
+                yield '0.01:29:59.000'+json.dumps({'Lines':{'1':{'NumberOfLaps':3}}})
+                yield '0.01:30:00.500'+json.dumps({'Lines':{'1':{'Position':'1'}}})
+            else:
+                yield '0.01:30:00.500'+json.dumps('compressed-fixture')
+        with tempfile.TemporaryDirectory() as cache,patch('bridge.archive.small_json',return_value={'Feeds':feeds}),patch('bridge.archive.lines',side_effect=stream),patch('bridge.archive.decode',return_value={'1':{'Utc':'2026-11-01T20:00:00.500Z'}}):
+            diagnostics={}
+            clip=fetch_clip('2026/Unit/',5400,480,cache,topics=topics,diagnostics=diagnostics)
+            self.assertEqual(clip['initial']['TimingData']['1']['NumberOfLaps'],3)
+            self.assertEqual(len(clip['events']),2)
+            self.assertEqual(clip['events'][0]['offsetMs'],500)
+            self.assertEqual(clip['clockBasis'],'gps-utc')
+            self.assertEqual(diagnostics['archiveFirstOffsetSeconds']['TimingData'],5399)
+            self.assertTrue(all(value=='available' for value in clip['capabilities'].values()))
+
     def test_non_stream_responses_are_classified_without_exporting_private_content(self):
         from bridge.archive import split_stream_record,ArchiveRecordError
         from bridge.diagnostics import safe_exception

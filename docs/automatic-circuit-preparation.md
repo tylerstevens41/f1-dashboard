@@ -198,3 +198,11 @@ The reader now matches the actual timestamp prefix rather than slicing twelve ch
 Per-topic errors include `formatKind` and a 32-character structural mask `prefixShape`: letters become `A`, digits become `9`, and only selected punctuation is retained. No original text, account data or raw response body is exported. These fields distinguish an actual stream-prefix issue from a login/security/routing/error response returned in place of telemetry. HTML alone does not prove which of those caused it.
 
 Pull the latest PR #6 update and repeat the existing Mexico command, then inspect `archiveTopicErrors` in `geometry-diagnostics.json`. Do not share raw stream responses or credentials. If parsing still fails, share the sanitized report; an `html-or-markup` or missing-prefix result requires addressing source delivery rather than choosing additional lap windows.
+
+### Mexico's day-prefixed elapsed timestamp
+
+The subsequent real diagnostic mask was `9.99:99:99.999` immediately followed by normal JSON/compressed JSON string payloads in all three topics. This identifies the unsupported **day-prefixed elapsed timestamp form** `d.hh:mm:ss.fff` (the masked day digit itself is unknown), rather than evidence of HTML or an authentication page. The parser now accepts both `hh:mm:ss.fff` and `d.hh:mm:ss.fff`, including supported fractional precision. Days are converted to elapsed milliseconds exactly; time is not rebased or guessed. Day-prefixed hours must be below 24; ordinary unprefixed elapsed hours may exceed 23.
+
+Tests reproduce the reported shape for metadata, seeded timing and compressed-position payload framing at offset 5400, plus nonzero days and midnight rollover. First parsed source offsets per topic are now included as `archiveFirstOffsetSeconds`, so any genuine window/origin issue can be distinguished next. The full authenticated Mexico reconstruction still needs the local rerun; this fixes the demonstrated framing mismatch, not a claim that all subsequent geometry checks have passed.
+
+No cache deletion or dependency changes are needed. Pull the update and repeat the one-window Mexico command above. If parsing succeeds, diagnostics should advance to extraction/cleaning/build with real counts instead of all topics reporting `invalid-stream-format`.

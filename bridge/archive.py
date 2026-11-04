@@ -37,18 +37,18 @@ class ArchiveRecordError(ValueError):
 
 
 def elapsed_ms(value):
-    match=re.fullmatch(r'(\d{1,3}):(\d{2}):(\d{2}(?:\.\d{1,9})?)',value)
+    match=re.fullmatch(r'(?:(\d{1,6})\.)?(\d{1,3}):(\d{2}):(\d{2}(?:\.\d{1,9})?)',value)
     if not match:
         raise ValueError('Invalid elapsed timestamp format')
-    hours, minutes, seconds = match.groups()
-    if int(minutes)>=60 or float(seconds)>=60:
+    days, hours, minutes, seconds = match.groups()
+    if int(minutes)>=60 or float(seconds)>=60 or (days is not None and int(hours)>=24):
         raise ValueError('Invalid elapsed timestamp range')
-    return (int(hours) * 3600 + int(minutes) * 60 + float(seconds)) * 1000
+    return (int(days or 0) * 86400 + int(hours) * 3600 + int(minutes) * 60 + float(seconds)) * 1000
 
 
 def split_stream_record(line):
     value=line.lstrip('\ufeff \t\r\n')
-    match=re.match(r'(\d{1,3}:\d{2}:\d{2}(?:\.\d{1,9})?)(?=\s*[{\["])',value)
+    match=re.match(r'((?:\d{1,6}\.)?\d{1,3}:\d{2}:\d{2}(?:\.\d{1,9})?)(?=\s*[{\["])',value)
     if not match:
         kind=('html-or-markup' if value.startswith('<') else
               'json-without-elapsed-prefix' if value.startswith(('{','[')) else
@@ -230,6 +230,7 @@ def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/li
         try:
             for line in lines(urljoin(path, stream), budget):
                 offset, payload_text = split_stream_record(line)
+                stats.setdefault('archiveFirstOffsetSeconds',{}).setdefault(topic,offset/1000)
                 if offset > end:
                     break
                 payload = json.loads(payload_text)

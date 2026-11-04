@@ -1,5 +1,6 @@
 """Bounded local LiveF1 circuit calibration. Credentials never leave the backend."""
 import argparse
+from collections import Counter
 import gzip
 import hashlib
 import json
@@ -88,10 +89,24 @@ def collect_clip(clip, diagnostics=None):
 
 def clean_laps(dataset, diagnostics=None):
     groups={};reasons={'invalid':0,'stale':0,'offTrack':0,'noLap':0,'pitLaps':0,'incompleteLaps':0,'outliers':0}
+    invalid={k:0 for k in ('missingValue','booleanValue','nonNumericValue','nonFiniteValue','zeroCoordinates')}
+    types={k:Counter() for k in ('x','y','time')}
+    lap_counts={'usable':0,'missing':0,'unsupported':0}
+    if diagnostics is not None:diagnostics.update(sampleCount=len(dataset['samples']),invalidSampleReasons=invalid,fieldTypes=types,lapNumberAvailability=lap_counts)
     for p in dataset['samples']:
         values=[p.get(k) for k in ('x','y','time')]
-        if any(isinstance(v,bool) or not isinstance(v,(int,float)) or not np.isfinite(v) for v in values) or (p['x']==0 and p['y']==0):
-            reasons['invalid']+=1;continue
+        for key,value in zip(types,values):
+            label='null' if value is None else 'boolean' if isinstance(value,bool) else 'integer' if isinstance(value,int) else 'float' if isinstance(value,float) else 'string' if isinstance(value,str) else 'other'
+            types[key][label]+=1
+        lap=p.get('lap')
+        lap_counts['missing' if lap is None else 'usable' if not isinstance(lap,bool) and str(lap).isdigit() else 'unsupported']+=1
+        issue=('missingValue' if any(v is None for v in values) else
+               'booleanValue' if any(isinstance(v,bool) for v in values) else
+               'nonNumericValue' if any(not isinstance(v,(int,float)) for v in values) else
+               'nonFiniteValue' if any(not np.isfinite(v) for v in values) else
+               'zeroCoordinates' if p['x']==0 and p['y']==0 else None)
+        if issue:
+            reasons['invalid']+=1;invalid[issue]+=1;continue
         if abs(p['time']-p.get('frameTime',p['time']))>5000:
             reasons['stale']+=1;continue
         if str(p.get('status','')).lower() not in ('ontrack',''):
@@ -213,9 +228,13 @@ def main():
     collect=commands.add_parser('collect');collect.add_argument('--year',type=int,default=2026);collect.add_argument('--meeting',default='Austin');collect.add_argument('--session',default='Race');collect.add_argument('--circuit',default='austin');collect.add_argument('--start',type=float,default=600);collect.add_argument('--duration',type=float,default=480);collect.add_argument('--clip',help='Use an existing bounded real LiveF1 clip instead of network');collect.add_argument('--output',required=True)
     generate=commands.add_parser('build');generate.add_argument('--samples',nargs='+',required=True);generate.add_argument('--svg',default='public/circuits/austin.svg');generate.add_argument('--svg-path-id');generate.add_argument('--layout-version',default='austin-livef1-v1');generate.add_argument('--threshold',type=float,default=0.015);generate.add_argument('--output',default='public/circuits/austin-calibration.json')
     check=commands.add_parser('validate');check.add_argument('--samples',required=True);check.add_argument('--calibration',default='public/circuits/austin-calibration.json');check.add_argument('--confirm-visual',action='store_true');check.add_argument('--confirm-start-finish',action='store_true')
+    inspect=commands.add_parser('inspect',help='Print safe counts from existing collected samples; no network or raw coordinates.');inspect.add_argument('--samples',required=True)
     args=parser.parse_args()
     try:
-        if args.command=='collect':
+        if args.command=='inspect':
+            stats={};clean_laps(read_json(args.samples),diagnostics=stats)
+            print(json.dumps(stats,indent=2,allow_nan=False))
+        elif args.command=='collect':
             clip=load_recording(args.clip) if args.clip else fetch_clip(select_session(args.year,args.meeting,args.session),args.start,args.duration)
             info=clip['initial'].get('SessionInfo',{})
             for event in clip['events']:

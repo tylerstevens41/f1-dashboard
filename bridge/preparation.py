@@ -329,7 +329,8 @@ def collect_geometry(meta, cache, report, windows=(5400, 6000, 3600)):
                 diagnostic.update(status='rejected',reason='no-position-samples')
                 continue
             if len(laps) < 3:
-                diagnostic.update(status='rejected',reason='insufficient-complete-laps',requiredCompleteLaps=3)
+                reason='no-valid-position-samples' if rejected['invalid']==len(data['samples']) else 'insufficient-complete-laps'
+                diagnostic.update(status='rejected',reason=reason,requiredCompleteLaps=3)
                 continue
             report(stage='geometry', state='preparing', windowStart=offset, windowDiagnostics=attempts)
             diagnostic['stage']='build'

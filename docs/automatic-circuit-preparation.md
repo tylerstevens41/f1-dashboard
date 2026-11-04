@@ -223,3 +223,18 @@ Every discovered attempt is labelled `windowSource`, and its predecessor records
 Pull and rerun the same one-window command. Preparation will use the observed coverage to attempt bounded alternatives automatically when supported. If it still fails, the same sanitized report now contains the coverage and any discovered attempts; no need to manually guess more offsets.
 
 If geometry is prepared at a different source offset, use `provenance.preparationWindowSeconds` from the calibration or the accepted window's `offset` in this report when loading a historical TEST clip. The TEST offset input accepts day-prefixed source ranges as numeric seconds. Preparation does not automatically change or restart playback.
+
+### GPS records decoded, but every sample is invalid
+
+The next real Mexico report successfully retrieves offset 92876: 478 position messages, 40,370 decoded samples, 22 drivers and modest clock skew. All 40,370 fail the numeric/finite/nonzero-position gate before lap grouping; zero candidates therefore does not prove missing complete laps. The report alone does not distinguish zero coordinates, missing fields, nonnumeric values or nonfinite coordinates, and zero timing messages inside the window does not establish whether a valid timing seed existed.
+
+Cleaning now reports mutually exclusive `invalidSampleReasons` (missing, boolean, nonnumeric, nonfinite, both X/Y zero), count-only `fieldTypes` for X/Y/time and `lapNumberAvailability` across **all** samples before filtering. These never include coordinate values, timestamps, strings or driver identities. All-invalid windows are labelled `no-valid-position-samples`, distinct from insufficient complete laps. No numeric coercion or GPS quality threshold has been changed without evidence.
+
+The already cached sample file can be inspected **offline**, without authentication or repeating any download:
+
+```powershell
+git pull --ff-only origin feat/automatic-circuit-preparation
+.\.venv\Scripts\python.exe -m bridge.calibrate inspect --samples .\circuit-assets\gps-cache\7d87504327050c365cbd3127e841f8fc489ac34f89eaf2597307752c7dd6401f.json.gz
+```
+
+That filename is the `sampleCacheEntry` in the supplied report. Use your configured store path if it differs. Share the count-only output. For a normal preparation rerun, the same counters are also included in geometry-diagnostics.json, using the sample cache when available. Real Mexico's invalid-value cause remains pending this inspection; do not assume the coordinates are zero or change timing/calibration to compensate.

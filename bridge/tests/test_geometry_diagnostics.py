@@ -153,6 +153,36 @@ class GeometryDiagnosticTests(unittest.TestCase):
         self.assertEqual(detail['code'],'invalid-position-record-schema')
         self.assertNotIn('private record',json.dumps(detail))
 
+    def test_invalid_gps_is_distinguished_from_missing_complete_laps(self):
+        data=dataset()
+        for sample in data['samples']:sample.update(x=0,y=0)
+        d,out=self.exercise(extract=data)
+        self.assertIsNone(out);self.assertEqual(d['reason'],'no-valid-position-samples')
+        self.assertEqual(d['invalidSampleReasons']['zeroCoordinates'],len(data['samples']))
+        self.assertEqual(d['candidateLaps'],0);self.assertEqual(d['lapNumberAvailability']['usable'],len(data['samples']))
+
+    def test_invalid_reasons_and_field_types_are_counts_without_raw_values(self):
+        data={'samples':[{'x':0,'y':0,'time':1}, {'x':None,'y':2,'time':1},
+                         {'x':'SECRET_TOKEN','y':2,'time':1}, {'x':True,'y':2,'time':1},
+                         {'x':float('inf'),'y':2,'time':1}]}
+        stats={};laps,rejected=clean_laps(data,stats)
+        self.assertEqual(laps,[]);self.assertEqual(rejected['invalid'],5)
+        self.assertTrue(all(value==1 for value in stats['invalidSampleReasons'].values()))
+        self.assertEqual(stats['fieldTypes']['x']['string'],1)
+        self.assertNotIn('SECRET_TOKEN',json.dumps(stats,allow_nan=False))
+
+    def test_offline_inspect_cli_reads_cached_samples_without_network_or_raw_data(self):
+        import subprocess,sys
+        with tempfile.TemporaryDirectory() as root:
+            from bridge.calibrate import write_json
+            path=Path(root)/'unit.json.gz'
+            write_json(path,{'samples':[{'x':0,'y':0,'time':1,'lap':None}]})
+            result=subprocess.run([sys.executable,'-m','bridge.calibrate','inspect','--samples',str(path)],capture_output=True,text=True,timeout=30)
+        self.assertEqual(result.returncode,0,result.stderr)
+        stats=json.loads(result.stdout)
+        self.assertEqual(stats['invalidSampleReasons']['zeroCoordinates'],1)
+        self.assertEqual(stats['lapNumberAvailability']['missing'],1)
+
     def test_real_decoder_compressed_payload_and_missing_timestamp_diagnostics(self):
         import base64,zlib
         from bridge.protocol import utc_ms

@@ -19,6 +19,10 @@ def safe_exception(exc, stage):
     name = name if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,79}', name) else 'Exception'
     result = {'exceptionType': name, 'stage': stage, 'messageSuppressed': True,
               'hint': HINTS.get(stage, 'Inspect local dependency installation and job diagnostics; no raw upstream error was exported.')}
+    if isinstance(exc,PermissionError):
+        result['hint']='Atomic file replacement was denied. A brief Windows reader/scanner lock is retried automatically; persistent failures require checking file permissions or another process holding the destination. Existing assets are retained.'
+        winerror=getattr(exc,'winerror',None)
+        if winerror in {5,32,33}:result['windowsErrorCode']=winerror
     code = getattr(exc, 'code', None)
     if code in {'fastf1-telemetry-unavailable','fastf1-authentication-required','authentication-required','topic-unpublished','archive-http-error','download-limit','no-events','record-limit','invalid-clip-schema','invalid-event-schema','invalid-position-record-schema','invalid-stream-format','scan-limit','missing-required-stream','invalid-timing-schema','no-lap-timing-in-bounded-source','no-moving-gps-in-bounded-source'}:
         result['code'] = code

@@ -332,3 +332,24 @@ inspect `error.exceptionType`, `error.upstreamLocation` and the
 `telemetry-readiness` / `telemetry-full-reload` events. The original Windows
 exception inside FastF1 is not established by the earlier DataNotLoadedError
 alone; real Mexico telemetry and annotation completion require local validation.
+
+### Windows checkpoint file-lock recovery
+
+The user's real Mexico run at `5102428` loaded usable positions for 22 drivers,
+registered 17 corners and accepted 40 of 76 inspected laps for sector calculation.
+It reached `complete: true` in 13.485 seconds, with a PermissionError at the atomic
+replace operation during sectors-checkpoint. This establishes successful source
+access/calculation locally, but not visual/physical annotation accuracy. The
+report does not identify the destination or the process holding it.
+
+Atomic annotation/progress/result writes now retry only Windows errors 5, 32 or
+33, at most six attempts with 0.5 seconds total backoff. Each attempt preserves
+the old destination and the complete temporary file; there is no delete-first
+fallback or non-atomic write. Persistent failure remains an error, now with a
+safe `windowsErrorCode` and file-permission/locking guidance. Other permission
+errors fail immediately. No geometry or annotation mathematics changed.
+
+Pull and rerun the same `--annotations-only` command above to reuse checkpoints.
+Completed corners/sectors should bypass source fetching; inspect final warnings
+and the display before considering annotations visually validated. No cache or
+geometry deletion is necessary.

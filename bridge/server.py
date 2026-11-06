@@ -29,6 +29,85 @@ class Bridge:
         self.offset = 0
         self.last_tick = time.monotonic()
 
+    def configure_preparation(self, root=None, enabled=False):
+        from .preparation import AssetStore
+        self.asset_store = AssetStore(root) if root else AssetStore()
+        self.allow_prepare = enabled
+        self.preparation_tasks = {}
+        self.preparation_lock = asyncio.Lock()
+        self.session_catalog = {}
+
+    async def circuit_command(self, client, command):
+        from .preparation import identity, PreparationError
+        if not hasattr(self, 'asset_store'):
+            self.configure_preparation()
+        try:
+            path = command.get('path')
+            year = int(command.get('year', datetime.now(timezone.utc).year))
+            info = self.state.topics.get('SessionInfo', {})
+            key = str(info.get('Meeting', {}).get('Circuit', {}).get('Key'))
+            bundle = await asyncio.to_thread(self.asset_store.lookup, year, path, None if path else key)
+            if bundle:
+                meta = bundle['identity']
+                session = {'path':meta['path'], 'year':meta['year'], 'event':meta['event'], 'session':meta['session'],
+                           'circuit':{'Key':meta['circuitKey'], 'ShortName':meta['name']}}
+            else:
+                if year not in self.session_catalog:
+                    self.session_catalog[year] = await asyncio.to_thread(list_sessions, year)
+                catalog = self.session_catalog[year]
+                if path:
+                    matches = [s for s in catalog if s['path'] == path]
+                else:
+                    matches = [s for s in catalog if str(s.get('circuit', {}).get('Key')) == key and s.get('session') == 'Race']
+                if len(matches) != 1:
+                    raise PreparationError('Select a published session with stable circuit metadata; no season/layout fallback was used')
+                session = matches[0]
+                meta = identity(session)
+                bundle = await asyncio.to_thread(self.asset_store.get, meta)
+            if bundle:
+                await self.send(client, {'version':1, 'type':'circuit-assets', 'bundle':bundle})
+            task = self.preparation_tasks.get(meta['assetKey'])
+            if command['action'] == 'circuit-prepare' and not (task and not task.done()):
+                if not self.allow_prepare:
+                    raise PreparationError('Restart backend with --allow-prepare to enable local preparation')
+                if meta['id'] == 'austin':
+                    raise PreparationError('Austin uses the existing local reference assets; automatic preparation will not replace them')
+                task = asyncio.create_task(self.prepare_circuit(session))
+                self.preparation_tasks[meta['assetKey']] = task
+            job_file = self.asset_store.directory(meta['assetKey']) / 'job.json'
+            from .preparation import read_json
+            job = read_json(job_file) if job_file.exists() else {}
+            active = bool(task and not task.done())
+            if job.get('state') in ('preparing','geometry-ready') and not active:
+                job = {**job, 'state':'interrupted', 'error':'Previous preparation interrupted. Cached geometry is retained; retry to continue.'}
+            await self.send(client, {'version':1, 'type':'circuit-job', 'job':{
+                **job, 'identity':meta, 'state': 'preparing' if active else job.get('state','ready' if bundle else 'missing'),
+                'enabled':self.allow_prepare, 'complete':bool(bundle and bundle.get('complete'))}})
+        except Exception as exc:
+            safe = str(exc) if isinstance(exc, PreparationError) else 'Circuit lookup unavailable. Check local archive authentication and metadata.'
+            await self.send(client, {'version':1, 'type':'circuit-job', 'job':{'state':'failed','path':command.get('path'),'error':safe}})
+
+    async def prepare_circuit(self, session):
+        from .preparation import prepare, PreparationError
+        loop = asyncio.get_running_loop()
+        def report(**job):
+            # The worker never changes race state, playback clocks or source tasks.
+            asyncio.run_coroutine_threadsafe(self.preparation_progress(job), loop).result()
+        async with self.preparation_lock:
+            try:
+                await asyncio.to_thread(prepare, session, self.asset_store, report, True)
+            except PreparationError:
+                pass  # sanitized failure already persisted/broadcast by coordinator
+            except Exception:
+                await self.broadcast({'version':1,'type':'circuit-job','job':{'state':'failed','path':session['path'],'error':'Preparation failed; existing assets retained.'}})
+
+    async def preparation_progress(self, job):
+        await self.broadcast({'version':1,'type':'circuit-job','job':job})
+        if job.get('stage') in ('geometry','ready','annotation-checkpoint'):
+            bundle = await asyncio.to_thread(self.asset_store.get, job['identity'])
+            if bundle:
+                await self.broadcast({'version':1,'type':'circuit-assets','bundle':bundle})
+
     async def send(self, client, message):
         try:
             await asyncio.wait_for(client.send(json.dumps(message, allow_nan=False)), timeout=2)
@@ -186,6 +265,9 @@ class Bridge:
             await asyncio.sleep(1)
 
     async def command(self, client, command):
+        if command.get('action') in ('circuit-lookup','circuit-prepare'):
+            await self.circuit_command(client, command)
+            return
         if not self.allow_test:
             await self.send(client, {'version':1,'type':'control-error','error':'TEST controls are disabled on this bridge.'})
             return
@@ -194,6 +276,8 @@ class Bridge:
                 action = command.get('action')
                 if action == 'sessions':
                     sessions = await asyncio.to_thread(list_sessions, int(command.get('year',2024)))
+                    if hasattr(self,'session_catalog'):
+                        self.session_catalog[int(command.get('year',2024))]=sessions
                     await self.send(client, {'version':1,'type':'sessions','sessions':sessions})
                 elif action == 'load':
                     await self.status('archive-loading')
@@ -246,6 +330,7 @@ class Bridge:
             self.clients.discard(websocket)
 
     async def run(self, args):
+        self.configure_preparation(args.circuit_store, args.allow_prepare)
         async with serve(self.connection, '127.0.0.1', args.port, max_size=65536,
                          origins=['http://localhost:5173','http://127.0.0.1:5173','http://localhost:4173','http://127.0.0.1:4173',None]):
             print(f'Bridge: ws://127.0.0.1:{args.port}; TEST controls {"enabled" if self.allow_test else "disabled"}')
@@ -266,6 +351,8 @@ class Bridge:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--allow-prepare',action='store_true',help='Enable local, bounded circuit preparation jobs.')
+    parser.add_argument('--circuit-store',help='Writable prepared circuit directory (default circuit-assets).')
     parser.add_argument('--port',type=int,default=8765)
     parser.add_argument('--allow-test',action='store_true',help='Enable local historical-session controls (development only).')
     parser.add_argument('--idle',action='store_true',help='Start without connecting to the live feed.')

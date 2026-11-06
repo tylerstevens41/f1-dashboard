@@ -1,0 +1,59 @@
+"""Credential-safe exception metadata. Never serialize exception messages/locals."""
+from pathlib import Path
+import re
+
+BRIDGE = Path(__file__).resolve().parent
+HINTS = {
+    'archive': 'For no-events inspect archiveWindowCounts, archiveLastOffsetSeconds and archiveFirstAfterWindowSeconds. For parse errors inspect archiveTopicErrors/formatKind. Do not share raw response bodies.',
+    'extract': 'Check Position.z decoder/schema and session-clock diagnostics; timing messages are required for lap grouping.',
+    'clean': 'Inspect sample/lap rejection counts and timestamps before changing quality thresholds.',
+    'build': 'Inspect calibration checks and repository exception location; do not force a closed outline.',
+    'cache': 'Inspect the disposable GPS sample cache and disk permissions; existing circuit assets are unchanged.',
+    'annotations': 'Inspect the last request/stage in annotation-worker-progress.json. For fastf1-authentication-required, authenticate interactively using .venv-fastf1\\Scripts\\python.exe -m fastf1 auth f1tv --authenticate, then retry annotations only. LiveF1 login is separate.',
+    'identity': 'Compare published circuit metadata with the requested circuit key; do not substitute another layout.',
+}
+
+
+def safe_exception(exc, stage):
+    name = type(exc).__name__
+    name = name if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,79}', name) else 'Exception'
+    result = {'exceptionType': name, 'stage': stage, 'messageSuppressed': True,
+              'hint': HINTS.get(stage, 'Inspect local dependency installation and job diagnostics; no raw upstream error was exported.')}
+    if isinstance(exc,PermissionError):
+        result['hint']='Atomic file replacement was denied. A brief Windows reader/scanner lock is retried automatically; persistent failures require checking file permissions or another process holding the destination. Existing assets are retained.'
+        winerror=getattr(exc,'winerror',None)
+        if winerror in {5,32,33}:result['windowsErrorCode']=winerror
+    code = getattr(exc, 'code', None)
+    if code in {'fastf1-telemetry-unavailable','fastf1-authentication-required','authentication-required','topic-unpublished','archive-http-error','download-limit','no-events','record-limit','invalid-clip-schema','invalid-event-schema','invalid-position-record-schema','invalid-stream-format','scan-limit','missing-required-stream','invalid-timing-schema','no-lap-timing-in-bounded-source','no-moving-gps-in-bounded-source'}:
+        result['code'] = code
+    if getattr(exc,'formatKind',None) in {'html-or-markup','json-without-elapsed-prefix','quoted-without-elapsed-prefix','unsupported-prefix'}:
+        result['formatKind']=exc.formatKind
+        result['prefixShape']=exc.prefixShape
+    if isinstance(exc, ModuleNotFoundError) and isinstance(exc.name, str) and re.fullmatch(r'[A-Za-z0-9_.]{1,80}', exc.name):
+        result['missingModule'] = exc.name
+    response = getattr(exc, 'response', None)
+    status = getattr(response, 'status_code', None)
+    if isinstance(status, int) and 100 <= status <= 599:
+        result['httpStatus'] = status
+    # Only locations inside this repository's bridge are exposed; no filesystem
+    # user names, source text, raw values, traceback locals, URLs or auth headers.
+    locations = []
+    trace = exc.__traceback__
+    while trace:
+        file = Path(trace.tb_frame.f_code.co_filename).resolve()
+        if file.parent == BRIDGE:
+            locations.append({'file': file.name, 'function': trace.tb_frame.f_code.co_name, 'line': trace.tb_lineno})
+        trace = trace.tb_next
+    upstream=[]
+    trace=exc.__traceback__
+    while trace:
+        frame=trace.tb_frame
+        module=frame.f_globals.get('__name__','')
+        if module in {'fastf1.core','fastf1._api','fastf1.internals.pandas_base'}:
+            name=frame.f_code.co_name
+            if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,79}',name):upstream.append({'module':module,'function':name,'line':trace.tb_lineno})
+        trace=trace.tb_next
+    if upstream:result['upstreamLocation']=upstream[-1]
+    if locations:
+        result['location'] = locations[-1]
+    return result

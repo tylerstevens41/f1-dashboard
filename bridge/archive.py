@@ -3,6 +3,7 @@ import gzip
 import hashlib
 import json
 import math
+import re
 import time
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -14,19 +15,47 @@ BASE = 'https://livetiming.formula1.com/static/'
 MAX_BYTES = 64 * 1024 * 1024
 CACHE_BYTES = 128 * 1024 * 1024
 MAX_SECONDS = 600
+MAX_START_SECONDS = 7 * 86400  # Source elapsed clocks can include day prefixes.
 
 
 class ArchiveUnavailable(RuntimeError):
-    pass
+    def __init__(self, message, code=None):
+        super().__init__(message)
+        self.code = code
 
 
 class TopicUnavailable(ArchiveUnavailable):
     pass
 
 
+class ArchiveRecordError(ValueError):
+    def __init__(self, kind, value):
+        super().__init__('Archive response is not a supported timestamp-prefixed stream')
+        self.code='invalid-stream-format'
+        self.formatKind=kind
+        # A structural mask, never a raw response/header/token excerpt.
+        self.prefixShape=''.join('9' if c.isdigit() else 'A' if c.isalpha() else c if c in ':.,{}[]<>/=" \t-' else '?' for c in value[:32])
+
+
 def elapsed_ms(value):
-    hours, minutes, seconds = value.split(':')
-    return (int(hours) * 3600 + int(minutes) * 60 + float(seconds)) * 1000
+    match=re.fullmatch(r'(?:(\d{1,6})\.)?(\d{1,3}):(\d{2}):(\d{2}(?:\.\d{1,9})?)',value)
+    if not match:
+        raise ValueError('Invalid elapsed timestamp format')
+    days, hours, minutes, seconds = match.groups()
+    if int(minutes)>=60 or float(seconds)>=60 or (days is not None and int(hours)>=24):
+        raise ValueError('Invalid elapsed timestamp range')
+    return (int(days or 0) * 86400 + int(hours) * 3600 + int(minutes) * 60 + float(seconds)) * 1000
+
+
+def split_stream_record(line):
+    value=line.lstrip('\ufeff \t\r\n')
+    match=re.match(r'((?:\d{1,6}\.)?\d{1,3}:\d{2}:\d{2}(?:\.\d{1,9})?)(?=\s*[{\["])',value)
+    if not match:
+        kind=('html-or-markup' if value.startswith('<') else
+              'json-without-elapsed-prefix' if value.startswith(('{','[')) else
+              'quoted-without-elapsed-prefix' if value.startswith('"') else 'unsupported-prefix')
+        raise ArchiveRecordError(kind,value)
+    return elapsed_ms(match.group(1)),value[match.end():].lstrip()
 
 
 def safe_url(path):
@@ -42,13 +71,13 @@ def response(path):
     result = requests.get(safe_url(path), headers=auth_header(), stream=True, timeout=(10, 30))
     if result.status_code in (401, 403):
         result.close()
-        raise ArchiveUnavailable('Archive access requires local LiveF1 authentication/entitlement (HTTP 401/403). Run --login locally; never share credentials.')
+        raise ArchiveUnavailable('Archive access requires local LiveF1 authentication/entitlement (HTTP 401/403). Run --login locally; never share credentials.', code='authentication-required')
     if not result.ok:
         code = result.status_code
         result.close()
         if code == 404:
-            raise TopicUnavailable('Archive topic not published (HTTP 404).')
-        raise ArchiveUnavailable(f'Archive request failed (HTTP {code}).')
+            raise TopicUnavailable('Archive topic not published (HTTP 404).', code='topic-unpublished')
+        raise ArchiveUnavailable(f'Archive request failed (HTTP {code}).', code='archive-http-error')
     return result
 
 
@@ -58,17 +87,17 @@ def lines(path, budget, limit=MAX_BYTES):
         for chunk in result.iter_content(65536):
             budget[0] += len(chunk)
             if budget[0] > limit:
-                raise ArchiveUnavailable('Clip download exceeded 64 MiB; choose an earlier/shorter window or a local recording.')
+                raise ArchiveUnavailable('Clip download exceeded 64 MiB; choose an earlier/shorter window or a local recording.', code='download-limit')
             pending += chunk
             parts = pending.split(b'\n')
             pending = parts.pop()
             for line in parts:
                 if len(line) > 2 * 1024 * 1024:
-                    raise ArchiveUnavailable('Archive record exceeds size limit.')
+                    raise ArchiveUnavailable('Archive record exceeds size limit.', code='record-limit')
                 if line.strip():
                     yield line.decode('utf-8-sig').strip()
             if len(pending) > 2 * 1024 * 1024:
-                raise ArchiveUnavailable('Archive record exceeds size limit.')
+                raise ArchiveUnavailable('Archive record exceeds size limit.', code='record-limit')
         if pending.strip():
             yield pending.decode('utf-8-sig').strip()
 
@@ -86,7 +115,9 @@ def list_sessions(year):
         raise ValueError('Year must be 2018–2100')
     index = small_json(f'{int(year)}/Index.json')
     return [{'path': session['Path'], 'label': f"{meeting.get('Name', '')} ({meeting.get('Location', '')}) · {session.get('Name', '')}",
-             'start': session.get('StartDate')}
+             'start': session.get('StartDate'), 'year': int(year), 'session': session.get('Name'),
+             'event': meeting.get('Name'), 'location': meeting.get('Location'),
+             'circuit': meeting.get('Circuit', {}), 'meetingKey': meeting.get('Key')}
             for meeting in index.get('Meetings', []) for session in meeting.get('Sessions', []) if session.get('Path')]
 
 
@@ -144,17 +175,26 @@ def prune_cache(cache):
             file.unlink()
 
 
-def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/livef1'):
-    if not 0 <= start_seconds <= 4 * 3600 or not 1 <= duration_seconds <= MAX_SECONDS:
-        raise ValueError('Start must be 0–14400 seconds, duration 1–600 seconds')
+def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/livef1', topics=None, diagnostics=None):
+    stats=diagnostics if diagnostics is not None else {}
+    stats.update(archiveCacheHit=False,archiveBytesRead=0,archivePartialEventCount=0)
+    if not 0 <= start_seconds <= MAX_START_SECONDS or not 1 <= duration_seconds <= MAX_SECONDS:
+        raise ValueError('Start must be 0–604800 source seconds, duration 1–600 seconds')
     safe_url(path)
     if not path.endswith('/'):
         raise ValueError('Select a session directory from the archive list')
-    key = hashlib.sha256(f'{path}|{start_seconds}|{duration_seconds}|v1'.encode()).hexdigest()
+    selected = TOPICS if topics is None else tuple(topics)
+    if not selected or len(set(selected))!=len(selected) or any(t not in TOPICS for t in selected):
+        raise ValueError('Select supported unique archive topics')
+    # Keep existing full TEST caches compatible; partial clips have distinct keys.
+    suffix = 'v1' if topics is None else 'topics-v1:'+','.join(selected)
+    key = hashlib.sha256(f'{path}|{start_seconds}|{duration_seconds}|{suffix}'.encode()).hexdigest()
     target = Path(cache) / f'{key}.json.gz'
     if target.exists():
         clip = load_recording(target)
         target.touch()
+        stats.update(archiveCacheHit=True,archivePartialEventCount=len(clip['events']))
+        stats.update(clip.get('diagnostics',{}).get('coverage',{}))
         return clip
     feeds = small_json(path + 'Index.json').get('Feeds', {})
     start = start_seconds * 1000
@@ -162,11 +202,13 @@ def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/li
     budget = [0]
     events = []
     capabilities = {}
+    topic_diagnostics = {}
     origin = None
     # Read each topic lazily; stop once the requested window has been passed.
     # Pre-window timing is replayed into a seed so tyres/identity are not lost.
     seed = RaceState('TEST')
-    for topic in TOPICS:
+    for topic in selected:
+        stats['archiveTopic']=topic
         feed = feeds.get(topic, {})
         stream = feed.get('StreamPath')
         if not stream:
@@ -189,10 +231,15 @@ def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/li
         count = 0
         try:
             for line in lines(urljoin(path, stream), budget):
-                offset = elapsed_ms(line[:12])
+                offset, payload_text = split_stream_record(line)
+                stats.setdefault('archiveFirstOffsetSeconds',{}).setdefault(topic,offset/1000)
+                stats.setdefault('archiveLastOffsetSeconds',{})[topic]=offset/1000
+                counts=stats.setdefault('archiveWindowCounts',{}).setdefault(topic,{'before':0,'inside':0,'after':0})
+                counts['before' if offset<start else 'after' if offset>end else 'inside']+=1
                 if offset > end:
+                    stats.setdefault('archiveFirstAfterWindowSeconds',{})[topic]=offset/1000
                     break
-                payload = json.loads(line[12:])
+                payload = json.loads(payload_text)
                 if topic == 'Position.z' and origin is None:
                     records = decode(topic, payload)
                     times = [utc_ms(r.get('Utc')) for r in records.values()]
@@ -211,13 +258,19 @@ def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/li
             capabilities[topic] = 'missing'
         except ArchiveUnavailable:
             raise  # Authentication/network/size failure is not silent topic loss.
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError) as exc:
+            from .diagnostics import safe_exception
             capabilities[topic] = 'parse-error'
+            topic_diagnostics[topic] = safe_exception(exc, 'archive')
+        finally:
+            stats.update(archiveBytesRead=budget[0],archivePartialEventCount=len(events),archiveCapabilities=dict(capabilities),archiveTopicErrors=dict(topic_diagnostics))
     # Stable ordering across topic streams, including metadata at equal timestamps.
     order = {topic: i for i, topic in enumerate(TOPICS)}
     events.sort(key=lambda e: (e['offsetMs'], order[e['topic']]))
+    if not events and topic_diagnostics:
+        raise ArchiveUnavailable('Archive stream format could not be parsed; see per-topic format diagnostics.', code='invalid-stream-format')
     if not events:
-        raise ArchiveUnavailable('No real archive events in the selected window. Choose another session/window or a captured recording.')
+        raise ArchiveUnavailable('No real archive events in the selected window. Choose another session/window or a captured recording.', code='no-events')
     # No fabricated UTC: GPS establishes archive stream origin when available.
     # Relative clock 0 is explicitly reported if the GPS topic is missing.
     origin = origin if origin is not None else 0
@@ -225,6 +278,7 @@ def fetch_clip(path, start_seconds=0, duration_seconds=120, cache='data-cache/li
     clip = {'format': 'livef1-clip-v1', 'source': 'LiveF1', 'sessionPath': path,
             'startOffsetSeconds': start_seconds, 'durationMs': duration_seconds * 1000, 'originMs': origin + start,
             'capabilities': capabilities, 'initial': initial, 'events': events,
+            'diagnostics': {'topicErrors':topic_diagnostics,'coverage':{k:stats.get(k,{}) for k in ('archiveFirstOffsetSeconds','archiveLastOffsetSeconds','archiveFirstAfterWindowSeconds','archiveWindowCounts')}},
             'initialFreshness': {topic: origin + offset for topic, offset in seed.freshness.items()},
             'capturedAt': time.time(), 'clockBasis': 'gps-utc' if origin else 'relative'}
     save_clip(target, validate_clip(clip))

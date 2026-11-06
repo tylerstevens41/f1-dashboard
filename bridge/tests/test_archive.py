@@ -34,6 +34,110 @@ class ArchiveTests(unittest.TestCase):
             with patch('bridge.archive.small_json',side_effect=AssertionError('network should not be used')):
                 self.assertEqual(fetch_clip('2024/Test/Race/',10,5,cache)['events'],clip['events'])
 
+    def test_geometry_topics_skip_unrelated_streams_and_have_separate_cache(self):
+        topics=['SessionInfo','TimingData','Position.z']
+        feeds={t:{'StreamPath':t+'.jsonStream'} for t in (*topics,'CarData.z')}
+        def stream(path,budget):
+            if 'CarData.z' in path:raise RuntimeError('Unrelated telemetry must not be downloaded for geometry')
+            if 'SessionInfo' in path:yield '00:00:01.000'+json.dumps({'Key':1})
+        with tempfile.TemporaryDirectory() as cache,patch('bridge.archive.small_json',return_value={'Feeds':feeds}),patch('bridge.archive.lines',side_effect=stream):
+            clip=fetch_clip('2026/Unit/',0,5,cache,topics=topics)
+            self.assertNotIn('CarData.z',clip['capabilities'])
+            self.assertEqual(len(list(Path(cache).glob('*.json.gz'))),1)
+            with self.assertRaisesRegex(RuntimeError,'Unrelated telemetry'):
+                fetch_clip('2026/Unit/',0,5,cache)
+            with patch('bridge.archive.lines',side_effect=AssertionError('Cached geometry should not fetch again')):
+                self.assertEqual(fetch_clip('2026/Unit/',0,5,cache,topics=topics)['events'],clip['events'])
+
+    def test_stream_prefix_uses_actual_length_not_twelve_character_slice(self):
+        from bridge.archive import split_stream_record
+        for prefix in ('00:00:01.234','0:00:01.2345678','00:00:01','000:00:01.2'):
+            offset,text=split_stream_record('\ufeff'+prefix+' '+json.dumps({'Key':1}))
+            self.assertAlmostEqual(offset,elapsed_ms(prefix))
+            self.assertEqual(json.loads(text),{'Key':1})
+        for bad in ('00:60:00','00:00:60','nan','-1:00:00'):
+            with self.assertRaises(ValueError):elapsed_ms(bad)
+
+    def test_dotnet_day_prefix_preserves_elapsed_time_and_wraparound(self):
+        from bridge.archive import split_stream_record
+        cases={'0.01:30:00.000':5400000,'1.00:00:00.000':86400000,
+               '1.02:03:04.1234567':93784123.4567,'12.23:59:59.999':1123199999}
+        for prefix,expected in cases.items():
+            offset,text=split_stream_record(prefix+'"compressed-position-fixture"')
+            self.assertAlmostEqual(offset,expected,places=3)
+            self.assertEqual(json.loads(text),'compressed-position-fixture')
+        self.assertAlmostEqual(elapsed_ms('1.00:00:00.000')-elapsed_ms('0.23:59:59.999'),1)
+        with self.assertRaises(ValueError):elapsed_ms('1.24:00:00.000')
+
+    def test_reported_day_prefix_shape_loads_actual_window_and_seeds_timing(self):
+        topics=('SessionInfo','TimingData','Position.z')
+        feeds={t:{'StreamPath':t+'.jsonStream'} for t in topics}
+        def stream(path,budget):
+            if 'SessionInfo' in path:
+                yield '0.00:00:00.000'+json.dumps({'Key':1})
+            elif 'TimingData' in path:
+                yield '0.01:29:59.000'+json.dumps({'Lines':{'1':{'NumberOfLaps':3}}})
+                yield '0.01:30:00.500'+json.dumps({'Lines':{'1':{'Position':'1'}}})
+            else:
+                yield '0.01:30:00.500'+json.dumps('compressed-fixture')
+        with tempfile.TemporaryDirectory() as cache,patch('bridge.archive.small_json',return_value={'Feeds':feeds}),patch('bridge.archive.lines',side_effect=stream),patch('bridge.archive.decode',return_value={'1':{'Utc':'2026-11-01T20:00:00.500Z'}}):
+            diagnostics={}
+            clip=fetch_clip('2026/Unit/',5400,480,cache,topics=topics,diagnostics=diagnostics)
+            self.assertEqual(clip['initial']['TimingData']['1']['NumberOfLaps'],3)
+            self.assertEqual(len(clip['events']),2)
+            self.assertEqual(clip['events'][0]['offsetMs'],500)
+            self.assertEqual(clip['clockBasis'],'gps-utc')
+            self.assertEqual(diagnostics['archiveFirstOffsetSeconds']['TimingData'],5399)
+            self.assertTrue(all(value=='available' for value in clip['capabilities'].values()))
+
+    def test_non_stream_responses_are_classified_without_exporting_private_content(self):
+        from bridge.archive import split_stream_record,ArchiveRecordError
+        from bridge.diagnostics import safe_exception
+        for text,kind in [('<!DOCTYPE html><html>token=SECRET_TOKEN</html>','html-or-markup'),
+                          ('{"token":"SECRET_TOKEN"}','json-without-elapsed-prefix'),
+                          ('"SECRET_TOKEN"','quoted-without-elapsed-prefix')]:
+            with self.assertRaises(ArchiveRecordError) as error:split_stream_record(text)
+            safe=safe_exception(error.exception,'archive')
+            self.assertEqual(safe['formatKind'],kind);self.assertEqual(safe['code'],'invalid-stream-format')
+            self.assertNotIn('SECRET_TOKEN',json.dumps(safe))
+
+    def test_three_topic_prefix_failures_reproduce_report_but_are_not_called_no_events(self):
+        feeds={t:{'StreamPath':t+'.jsonStream'} for t in ('SessionInfo','TimingData','Position.z')}
+        for content,kind in [('<html>private auth response</html>','html-or-markup'),
+                             ('{"private":"response"}','json-without-elapsed-prefix')]:
+            with tempfile.TemporaryDirectory() as cache,patch('bridge.archive.small_json',return_value={'Feeds':feeds}),patch('bridge.archive.lines',return_value=iter(())):
+                def stream(*args,**kwargs):yield content
+                diagnostics={}
+                with patch('bridge.archive.lines',side_effect=stream),self.assertRaises(ArchiveUnavailable) as error:
+                    fetch_clip('2026/Unit/',5400,480,cache,topics=tuple(feeds),diagnostics=diagnostics)
+                self.assertEqual(error.exception.code,'invalid-stream-format')
+                self.assertEqual(len(diagnostics['archiveTopicErrors']),3)
+                self.assertTrue(all(e['formatKind']==kind for e in diagnostics['archiveTopicErrors'].values()))
+                self.assertNotIn('private',json.dumps(diagnostics))
+                self.assertEqual(list(Path(cache).glob('*')),[])
+
+    def test_empty_window_reports_observed_gap_and_day_clock_without_rebasing(self):
+        topics=('SessionInfo','TimingData','Position.z')
+        feeds={t:{'StreamPath':t+'.jsonStream'} for t in topics}
+        def stream(path,budget):
+            if 'SessionInfo' in path:yield '0.00:00:00.000'+json.dumps({'Key':1})
+            elif 'TimingData' in path:
+                yield '0.00:10:16.721'+json.dumps({'Lines':{}})
+                yield '1.01:00:00.000'+json.dumps({'Lines':{}})
+            else:
+                yield '0.00:10:16.289'+json.dumps('fixture')
+                yield '1.01:00:00.000'+json.dumps('fixture')
+        decoded={'1':{'DriverNo':'1','Utc':'2026-11-01T20:00:00Z','X':1,'Y':2}}
+        with tempfile.TemporaryDirectory() as cache,patch('bridge.archive.small_json',return_value={'Feeds':feeds}),patch('bridge.archive.lines',side_effect=stream),patch('bridge.archive.decode',return_value=decoded),patch('bridge.protocol.decode',return_value=decoded):
+            stats={}
+            with self.assertRaises(ArchiveUnavailable) as error:
+                fetch_clip('2026/Unit/',5400,480,cache,topics=topics,diagnostics=stats)
+            self.assertEqual(error.exception.code,'no-events')
+            self.assertEqual(stats['archiveFirstAfterWindowSeconds']['Position.z'],90000)
+            self.assertEqual(stats['archiveLastOffsetSeconds']['Position.z'],90000)
+            self.assertEqual(stats['archiveWindowCounts']['Position.z'],{'before':1,'inside':0,'after':1})
+            self.assertEqual(stats['archiveTopicErrors'],{})
+
     def test_recording_round_trip_and_rejects_non_livef1(self):
         clip={'format':'livef1-clip-v1','source':'LiveF1','durationMs':1000,'originMs':0,'initial':{},'events':[]}
         with tempfile.TemporaryDirectory() as directory:

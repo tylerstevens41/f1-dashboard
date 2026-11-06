@@ -53,6 +53,17 @@ def write(path, value):
 
 
 def fetch(year, event, session_name, cache, lap_collector=None, cache_only=False, progress=None, metadata_ready=None, source_ready=None):
+    from .fastf1_network import bounded_network
+    with bounded_network(progress or (lambda *a,**k:None)) as failures:
+        try:
+            return _fetch(year,event,session_name,cache,lap_collector,cache_only,progress,metadata_ready,source_ready)
+        except Exception:
+            # FastF1 soft-exception loaders may hide the original HTTP/auth error.
+            if failures:raise failures[0] from None
+            raise
+
+
+def _fetch(year, event, session_name, cache, lap_collector=None, cache_only=False, progress=None, metadata_ready=None, source_ready=None):
     notify=progress or (lambda *a,**k:None)
     notify('fastf1-import')
     import fastf1

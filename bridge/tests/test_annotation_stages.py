@@ -77,7 +77,8 @@ class AnnotationStageTests(unittest.TestCase):
             self.assertTrue(any(k=='source' for k,*_ in timeline));timeline.append(('laps',40))
             if progress:progress(inspected=7,accepted=7,rejected=0)
             return source['boundaryLaps']
-        with tempfile.TemporaryDirectory() as temp,patch.dict('sys.modules',{'fastf1':fake}):
+        from contextlib import nullcontext
+        with tempfile.TemporaryDirectory() as temp,patch.dict('sys.modules',{'fastf1':fake}),patch('bridge.fastf1_network.bounded_network',return_value=nullcontext([])):
             value=fetch(2026,'synthetic','R',temp,lap_collector=collector,progress=lambda *a,**k:None,metadata_ready=metadata.append,source_ready=ready)
         self.assertEqual([entry for entry in timeline if entry[0]=='info'],[('info',False),('info',True)])
         self.assertIsNone(metadata[0]['corners'][0]['distance'])

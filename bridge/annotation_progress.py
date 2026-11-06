@@ -8,7 +8,7 @@ import tempfile
 import time
 from .diagnostics import safe_exception
 
-PHASES={'fastf1-import','starting','source-cache','fastf1-cache-open','fastf1-cache-prune','fastf1-session-retrieval','fastf1-laps-load',
+PHASES={'http-request','fastf1-authentication-required','session-info-load','driver-list-load','session-status-load','lap-count-load','track-status-load','timing-data-load','timing-data-parse','timing-app-load','fastf1-import','starting','source-cache','fastf1-cache-open','fastf1-cache-prune','fastf1-session-retrieval','fastf1-laps-load',
         'corner-metadata-retrieval','corner-metadata-distances','fastf1-telemetry-load',
         'car-data-download','car-data-parse','position-data-download','position-data-parse','car-data-cache','position-data-cache',
         'reference-lap-position','source-save','corner-registration','corners-checkpoint',
@@ -36,7 +36,11 @@ class Progress:
     def event(self,phase,**counts):
         if phase not in PHASES:raise ValueError('Unknown annotation phase')
         now=time.time()
-        allowed={k:v for k,v in counts.items() if k in {'inspected','accepted','rejected','corners','metadataCorners','sourceCacheHit','checkpointHit'} and isinstance(v,(bool,int,float))}
+        allowed={k:v for k,v in counts.items() if k in {'inspected','accepted','rejected','corners','metadataCorners','sourceCacheHit','checkpointHit','httpStatus','cacheHit','requestSeconds'} and isinstance(v,(bool,int,float))}
+        for key,values in {'endpointKind':{'SessionInfo','DriverList','SessionStatus','LapCount','TrackStatus','TimingData','TimingAppData','Position','CarData','Index','live-timing','race-results','circuit-metadata','other-upstream'},'requestState':{'started','completed','failed'},'exceptionType':{'Timeout','ReadTimeout','ConnectTimeout','ConnectionError','FastF1AuthenticationRequired','RequestError'}}.items():
+            if counts.get(key) in values:allowed[key]=counts[key]
+        if phase=='http-request' and counts.get('requestState')=='started':
+            for key in ('httpStatus','cacheHit','exceptionType','requestSeconds'):self.value.pop(key,None)
         if self.value['phase']!=phase:
             previous=self.value['phase'];durations=self.value['phaseDurationsSeconds']
             durations[previous]=round(durations.get(previous,0)+time.monotonic()-self.phase_tick,3)
@@ -60,7 +64,7 @@ class Progress:
 
 class FastF1Stages(logging.Handler):
     """Only exact library literals; never format or export logging arguments."""
-    stages={'Fetching car data...':'car-data-download','Parsing car data...':'car-data-parse',
+    stages={'Fetching session info data...':'session-info-load','Fetching driver list...':'driver-list-load','Fetching session status data...':'session-status-load','Fetching lap count data...':'lap-count-load','Fetching track status data...':'track-status-load','Fetching timing data...':'timing-data-load','Parsing timing data...':'timing-data-parse','Fetching timing app data...':'timing-app-load','Fetching car data...':'car-data-download','Parsing car data...':'car-data-parse',
             'Fetching position data...':'position-data-download','Parsing position data...':'position-data-parse',
             'Using cached data for car_data':'car-data-cache','Using cached data for position_data':'position-data-cache'}
     def __init__(self,report):super().__init__();self.report=report

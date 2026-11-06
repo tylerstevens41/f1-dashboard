@@ -488,11 +488,11 @@ def import_annotations(meta, calibration, root, report, runner=None, process_fac
         process=None
         try:
             if runner is not None:  # Injectable synchronous runner for existing integrations/tests.
-                result=runner(args,cwd=ROOT,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=timeout,check=False)
+                result=runner(args,cwd=ROOT,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=timeout,check=False)
                 inspect_progress()
                 if result.returncode!=0:extra.append('FastF1 worker exited unsuccessfully; inspect annotation-diagnostics.json.')
             else:
-                process=(process_factory or subprocess.Popen)(args,cwd=ROOT,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                process=(process_factory or subprocess.Popen)(args,cwd=ROOT,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
                 started=clock()
                 while process.poll() is None:
                     inspect_progress()

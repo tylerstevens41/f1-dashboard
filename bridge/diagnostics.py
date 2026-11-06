@@ -9,6 +9,7 @@ HINTS = {
     'clean': 'Inspect sample/lap rejection counts and timestamps before changing quality thresholds.',
     'build': 'Inspect calibration checks and repository exception location; do not force a closed outline.',
     'cache': 'Inspect the disposable GPS sample cache and disk permissions; existing circuit assets are unchanged.',
+    'annotations': 'Inspect the last request/stage in annotation-worker-progress.json. For fastf1-authentication-required, authenticate interactively using .venv-fastf1\\Scripts\\python.exe -m fastf1 auth f1tv --authenticate, then retry annotations only. LiveF1 login is separate.',
     'identity': 'Compare published circuit metadata with the requested circuit key; do not substitute another layout.',
 }
 
@@ -19,7 +20,7 @@ def safe_exception(exc, stage):
     result = {'exceptionType': name, 'stage': stage, 'messageSuppressed': True,
               'hint': HINTS.get(stage, 'Inspect local dependency installation and job diagnostics; no raw upstream error was exported.')}
     code = getattr(exc, 'code', None)
-    if code in {'authentication-required','topic-unpublished','archive-http-error','download-limit','no-events','record-limit','invalid-clip-schema','invalid-event-schema','invalid-position-record-schema','invalid-stream-format','scan-limit','missing-required-stream','invalid-timing-schema','no-lap-timing-in-bounded-source','no-moving-gps-in-bounded-source'}:
+    if code in {'fastf1-authentication-required','authentication-required','topic-unpublished','archive-http-error','download-limit','no-events','record-limit','invalid-clip-schema','invalid-event-schema','invalid-position-record-schema','invalid-stream-format','scan-limit','missing-required-stream','invalid-timing-schema','no-lap-timing-in-bounded-source','no-moving-gps-in-bounded-source'}:
         result['code'] = code
     if getattr(exc,'formatKind',None) in {'html-or-markup','json-without-elapsed-prefix','quoted-without-elapsed-prefix','unsupported-prefix'}:
         result['formatKind']=exc.formatKind

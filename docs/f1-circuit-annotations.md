@@ -256,3 +256,54 @@ npm run dev
 ```
 
 Reload the dashboard with your existing `austin-calibration.json`, `austin-corners.json` and `austin-sectors.json`. Leave **Preview calculated boundaries only** OFF: the normal display should match the preview you already tested. In the editor, choose S1 and select Saved manual override; only S1 should move. Refresh to confirm the explicit choice remains. Choose Calculated (or Use calculated position), then refresh again: S1 should stay calculated and the old manual fraction should remain available. Repeat for start/finish and S2 if desired. FIA warnings and provisional status must remain visible. No session download, corner re-import, recalibration, file replacement or deletion is required.
+
+### PR #6: bounded FastF1 lap-loading probe
+
+FastF1 3.9.0 authenticates live-timing HTTP requests independently of LiveF1.
+The background importer now refuses interactive login, retains existing valid
+FastF1 tokens and cached responses, and never copies LiveF1 credentials.
+Authenticate interactively in the dedicated environment if the report says
+`fastf1-authentication-required`. Never share authentication output or tokens.
+
+```powershell
+git switch feat/automatic-circuit-preparation
+git pull --ff-only origin feat/automatic-circuit-preparation
+.\.venv-fastf1\Scripts\python.exe -m fastf1 auth f1tv --authenticate
+.\.venv-fastf1\Scripts\python.exe -m bridge.fastf1_probe --year 2026 --event Mexico --session Race --seconds 45 --report .\fastf1-probe.json
+Get-Content .\fastf1-probe.json -Raw
+.\.venv\Scripts\python.exe -m bridge.preparation --year 2026 --event Mexico --session Race --annotations-only --login
+Get-Content .\circuit-assets\circuit-65-2026\annotation-worker-progress.json -Raw
+Get-Content .\circuit-assets\circuit-65-2026\annotation-diagnostics.json -Raw
+```
+
+The probe has a hard 45-second process deadline. HTTP calls have 10-second
+connect and 30-second read-inactivity limits; these are not whole-download
+limits. The existing 600-second worker deadline remains unchanged. Progress
+records exact known API loading/parsing stages and sanitized request category,
+start/completion/failure, elapsed seconds, status and cache hit. No URL, query,
+header, response body or raw exception text is exported. HTTP 401/403 indicates
+access rejection; timeouts/connection errors indicate transport failure; parsing
+stages after completed requests distinguish local processing. A hard probe
+timeout retains its last stage/request for diagnosis. A successful probe only
+confirms lap loading, not annotation accuracy or upstream position availability.
+
+`Session.get_circuit_info()` in the pinned version accesses both `session_info`
+and `laps`; the lower-level MultiViewer function is marked private. We do not
+fabricate a lap table, switch sessions or depend on that private metadata API.
+Metadata is checkpointed immediately after the supported public method succeeds;
+registration still requires real reference-lap positions. Existing completed
+corners/sectors and geometry remain intact on failure. Austin registration,
+sector calculation and all rendering settings are unchanged.
+
+The narrow token-manager hook is specific to pinned FastF1 3.9.0 and restored
+on exit. Requests still use FastF1's own authenticated adapters, cache and rate
+limits. No retries or alternative sessions are added. Actual Windows blocking
+operation remains unconfirmed until the probe is run locally.
+
+Validation in this checkout: the short real network probe resolved the session
+and received schedule/results responses, but the first SessionInfo request hit
+`fastf1-authentication-required` before network transmission. It exited with a
+safe report in approximately 11 seconds. No real Mexico lap or GPS data loaded,
+so upstream telemetry availability and the user's specific Windows stall remain
+unconfirmed. Run the same probe after local FastF1 authentication to establish
+the next operation. Do not share credentials or raw library logs.

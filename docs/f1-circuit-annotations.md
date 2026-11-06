@@ -353,3 +353,58 @@ Pull and rerun the same `--annotations-only` command above to reuse checkpoints.
 Completed corners/sectors should bypass source fetching; inspect final warnings
 and the display before considering annotations visually validated. No cache or
 geometry deletion is necessary.
+
+### Automatic corner-label collision avoidance (PR #6)
+
+The shared renderer now runs a pure, memoized render-only layout pass for every
+circuit. It starts from the existing manual/imported offset times the unchanged
+1.15 spacing multiplier; circles/text retain the existing 1.65 scale. Numeric
+turn number, then suffix, defines a stable priority independent of input order.
+Lower turns keep clear preferred placements, so Turn 17 moves before Turn 15.
+
+Collision envelopes include circle stroke and a configurable safety margin.
+The first correction reflects the preferred vector across the local track
+tangent at the exact stored corner fraction: its normal component reverses,
+its tangential component and length remain unchanged. Every candidate checks
+all other label positions, the entire rendered track polyline and approximate
+fixed start/finish, timing-boundary and speed-trap envelopes. If reflection is
+blocked, 24 deterministic normal/distance/tangential alternatives are considered,
+up to 1.75 times the initial offset distance. No iterative settling, randomness,
+driver-dependent inputs or exported-coordinate changes are involved.
+
+If no clear candidate exists, a deterministic score prioritizes already placed
+lower turns, then total conflicts, penetration and movement. A final pass exposes
+unresolved turn numbers as a development-only yellow SVG warning. This is a
+bounded greedy layout, not a guarantee that every dense stadium can be packed.
+Fixed text/marker envelopes are conservative approximations; pit-lane/DRS effects
+are not separate obstacles. Manual editor/export data remains the original
+preferred placement. The existing selected anchor indicator stays at the real
+corner, even if the rendered circle is automatically displaced.
+
+Track appearance adds **Corner collision margin** in native SVG units (default
+35). This preference uses the existing appearance persistence. Native geometry,
+labels and margin scale uniformly with the responsive SVG, so browser resizing
+does not change overlap relationships or cause a viewBox feedback loop. Geometry,
+annotations, visibility, size, spacing and track-width changes recompute layout;
+driver updates do not. The viewport expands to include resolved labels.
+
+Local review after pulling the branch:
+
+```powershell
+git switch feat/automatic-circuit-preparation
+git pull --ff-only origin feat/automatic-circuit-preparation
+# In your backend terminal:
+.\.venv\Scripts\python.exe -m bridge.server --idle --allow-test --allow-prepare --login
+# In a separate terminal:
+npm run dev
+```
+
+Select your existing Mexico Race TEST clip and prepared circuit. No preparation,
+FastF1 import, cache deletion or geometry regeneration is required. Inspect Turns
+15/17 in the stadium, then change corner size, spacing and collision margin in
+Track appearance. Confirm all 17 labels stay readable, drivers remain unchanged,
+and no yellow unresolved-collision warning appears. Repeat with Austin's existing
+calibration and all 20 turns. Change a manual offset in the editor and confirm
+preview updates immediately; export retains the manual offset, not the automatic
+resolved circle position. Check narrow and full-screen windows. Real Mexico/Austin
+visual success still requires the user's local assets; no screenshot is claimed.

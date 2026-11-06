@@ -49,3 +49,19 @@ class AtomicAnnotationTests(TestCase):
             with patch('bridge.annotation_progress.os.replace',side_effect=PermissionError('denied')) as replace,patch('bridge.annotation_progress.time.sleep') as sleep:
                 with self.assertRaises(PermissionError):atomic(Path(temp)/'output.json',{})
             self.assertEqual(replace.call_count,1);sleep.assert_not_called()
+
+    def test_circuit_revision_writer_uses_same_bounded_lock_recovery(self):
+        import os
+        from bridge.preparation import atomic_json
+        original=os.replace
+        with tempfile.TemporaryDirectory() as temp:
+            target=Path(temp)/'current.json';atomic_json(target,{'revision':'old'})
+            attempts=[]
+            def replace(source,destination):
+                attempts.append(1)
+                if len(attempts)==1:raise locked(32)
+                original(source,destination)
+            with patch('bridge.annotation_progress.os.replace',side_effect=replace),patch('bridge.annotation_progress.time.sleep'):
+                atomic_json(target,{'revision':'new'})
+            self.assertEqual(len(attempts),2)
+            self.assertEqual(json.loads(target.read_text()),{'revision':'new'})

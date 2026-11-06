@@ -58,7 +58,8 @@ def atomic_json(path, value):
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        from .annotation_progress import replace_file
+        replace_file(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
 
@@ -365,8 +366,11 @@ def collect_geometry(meta, cache, report, windows=(5400, 6000, 3600)):
             diagnostic['stage']='build'
             areas = [float(np.sum(lap['points'][:,0]*np.roll(lap['points'][:,1],-1)-np.roll(lap['points'][:,0],-1)*lap['points'][:,1])) for lap in laps]
             if any(abs(area)<1e-6 for area in areas) or len({bool(area>0) for area in areas}) != 1:
-                diagnostic.update(status='rejected',reason='inconsistent-driving-direction-or-degenerate-loop')
-                continue
+                from .trajectory_order import direction_consensus
+                diagnostic['orderedDirection']=direction_consensus(laps)
+                if not diagnostic['orderedDirection']['passed']:
+                    diagnostic.update(status='rejected',reason='inconsistent-driving-direction-or-degenerate-loop')
+                    continue
             diagnostic['calibrationAttempted']=True
             result = build(data, layout=meta['layoutVersion'])
             checks=result['validation']

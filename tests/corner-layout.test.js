@@ -57,3 +57,18 @@ test('corner letters use numeric turn priority then stable suffix ordering',()=>
  assert.deepEqual(layout([b,a]),layout([a,b]));assert.equal(layout([b,a]).labels[0].feature.letter,undefined);
  assert.equal(segmentDistance({x:4,y:3},{x:0,y:0},{x:8,y:0}),3);
 });
+test('figure-eight crossover keeps distinct path visits and stable label anchors',async()=>{
+ const {pointAt,pathRange}=await import('../src/circuits/geometry.js');
+ const points=Array.from({length:257},(_,i)=>{const t=i/256*2*Math.PI;return {x:5000*Math.sin(t),y:2500*Math.sin(2*t)};});
+ const lengths=[0];for(let i=1;i<points.length;i++)lengths.push(lengths.at(-1)+Math.hypot(points[i].x-points[i-1].x,points[i].y-points[i-1].y));
+ const eight={points,lengths,total:lengths.at(-1)};
+ const first=pointAt(eight,0),second=pointAt(eight,.5);
+ assert.ok(Math.hypot(first.x-second.x,first.y-second.y)<1e-8);
+ assert.notEqual(first.angle,second.angle);
+ assert.ok(pathRange(eight,0,.5).split('L').length>100);
+ const input=[{feature:{number:15,at:0},x:0,y:-700,radius:255},{feature:{number:17,at:.5},x:0,y:-700,radius:255}];
+ const result=layout(input,{geometry:eight,trackWidth:330});
+ assert.deepEqual(result,layout([...input].reverse(),{geometry:eight,trackWidth:330}));
+ assert.equal(result.labels[0].feature.at,0);assert.equal(result.labels[1].feature.at,.5);
+ assert.deepEqual(input.map(l=>l.y),[-700,-700]);
+});

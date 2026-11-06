@@ -23,17 +23,21 @@ def atomic(path,value):
     try:
         with os.fdopen(fd,'w',encoding='utf8') as handle:
             handle.write(text);handle.flush();os.fsync(handle.fileno())
-        # Windows readers/security scanners may briefly hold the destination
-        # without FILE_SHARE_DELETE. Keep the complete temp file and old target
-        # intact while retrying only known Windows access/sharing violations.
-        for attempt in range(6):
-            try:
-                os.replace(temp,path)
-                break
-            except PermissionError as exc:
-                if getattr(exc,'winerror',None) not in {5,32,33} or attempt==5:raise
-                time.sleep(min(.02*2**attempt,.2))
+        replace_file(temp,path)
     finally:Path(temp).unlink(missing_ok=True)
+
+
+def replace_file(temp,path):
+    # Windows readers/security scanners may briefly hold the destination
+    # without FILE_SHARE_DELETE. Keep the complete temp file and old target
+    # intact while retrying only known Windows access/sharing violations.
+    for attempt in range(6):
+        try:
+            os.replace(temp,path)
+            break
+        except PermissionError as exc:
+            if getattr(exc,'winerror',None) not in {5,32,33} or attempt==5:raise
+            time.sleep(min(.02*2**attempt,.2))
 
 
 class Progress:

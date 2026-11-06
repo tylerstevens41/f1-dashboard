@@ -101,18 +101,20 @@ def _fetch(year, event, session_name, cache, lap_collector=None, cache_only=Fals
         notify('fastf1-telemetry-load')
         # Public FastF1 API retains its own car+position/t0 clock processing.
         # Do not bypass it with a different position clock or private loader.
-        session.load(laps=False,telemetry=True,weather=False,messages=False)
-        notify('corner-metadata-distances')
-        info = session.get_circuit_info()
-        if info is None:
-            raise ImportFailure('FastF1 returned no circuit information')
+        from .reference_telemetry import load_positions, reference_positions
+        load_positions(session,notify)
         notify('reference-lap-position')
-        lap = session.laps.pick_fastest()
-        if lap is None:
-            raise ImportFailure('No reference lap available')
-        pos = lap.get_pos_data()[['X', 'Y']].dropna()
-        if len(pos) < 100:
-            raise ImportFailure('Insufficient reference-lap position data')
+        lap,pos = reference_positions(session,notify)
+        notify('corner-metadata-distances')
+        try:
+            info = session.get_circuit_info()
+        except (KeyError,):
+            # Public metadata distance generation always uses the fastest lap.
+            # Its driver may lack telemetry even when our fallback lap is valid.
+            # Retain original source coordinates; distances are not registration
+            # inputs and must not be invented from another lap.
+            info = metadata
+        if info is None:raise ImportFailure('FastF1 returned no circuit information')
         result = {'schema': SCHEMA, 'year': year, 'event': event, 'session': session_name,
                 'eventName': str(session.event.EventName), 'circuitKey': session.session_info['Meeting']['Circuit']['Key'],
                 'provider': 'FastF1 / MultiViewer', 'fastf1Version': fastf1.__version__,

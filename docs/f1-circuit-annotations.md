@@ -307,3 +307,28 @@ safe report in approximately 11 seconds. No real Mexico lap or GPS data loaded,
 so upstream telemetry availability and the user's specific Windows stall remain
 unconfirmed. Run the same probe after local FastF1 authentication to establish
 the next operation. Do not share credentials or raw library logs.
+
+### Parsed positions followed by DataNotLoadedError
+
+Download/parse log messages do not prove that `Session.pos_data` was initialized.
+FastF1's telemetry loader catches failures during subsequent clock calculation
+and per-driver Telemetry construction. The importer now checks public position
+and clock properties immediately after loading, captures the original telemetry
+loader exception without exporting its text, and records safe FastF1 function/
+line information. It attempts one complete public `Session.load(laps=True,
+telemetry=True, weather=False, messages=False)` using existing caches to recover
+partial session state. If this also fails, no missing properties are fabricated
+and the original safe error is retained at `telemetry-readiness`.
+
+A usable fastest lap remains the reference. If that lap lacks accessible finite,
+moving position samples, the importer tries other accurate quick non-pit laps
+through public lap selectors, preserving driver/session binding and all existing
+registration and sector mathematics. No alternate session is selected. Reports
+show `positionDrivers`, `usablePositionDrivers`, and reference-lap rejection
+counts. Existing annotation checkpoints and geometry remain untouched on failure.
+
+Use the annotation-only retry and report commands above. If it still fails,
+inspect `error.exceptionType`, `error.upstreamLocation` and the
+`telemetry-readiness` / `telemetry-full-reload` events. The original Windows
+exception inside FastF1 is not established by the earlier DataNotLoadedError
+alone; real Mexico telemetry and annotation completion require local validation.

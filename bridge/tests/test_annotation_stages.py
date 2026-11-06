@@ -68,9 +68,10 @@ class AnnotationStageTests(unittest.TestCase):
             timeline.append(('info',telemetry[0]));frame=pd.DataFrame(rows)
             if not telemetry[0]:frame['Distance']=float('nan')
             return SimpleNamespace(rotation=source['rotation'],corners=frame)
-        lap=SimpleNamespace(Driver='1',LapNumber=3,get_pos_data=lambda:pd.DataFrame(reference,columns=['X','Y']))
+        lap=SimpleNamespace(Driver='1',DriverNumber='1',LapNumber=3,get_pos_data=lambda:pd.DataFrame(reference,columns=['X','Y']))
         session=SimpleNamespace(load=load,get_circuit_info=circuit_info,laps=SimpleNamespace(pick_fastest=lambda:lap),
             event=SimpleNamespace(EventName='Synthetic'),session_info={'Meeting':{'Circuit':{'Key':65}}})
+        session.pos_data={'1':pd.DataFrame({'X':[1],'Y':[2],'SessionTime':[pd.Timedelta(0)]})};session.t0_date=pd.Timestamp('2026-01-01');lap.session=session
         fake=SimpleNamespace(__version__='3.9.0',get_session=Mock(return_value=session),Cache=Mock())
         def ready(value):timeline.append(('source',len(value['reference'])))
         def collector(value,progress=None):

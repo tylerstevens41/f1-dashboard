@@ -150,3 +150,49 @@ checkpoint, crossover, animation, importer, sector and Windows atomic-write suit
 remain the regression coverage. Local authenticated execution is still required
 for every missing real circuit; unavailable or unverified fallback circuits mean
 full-season completion remains incomplete.
+
+## Completion-checklist follow-up
+
+The canonical queue remains `circuit-assets/season-2026/report.json`. Each saved
+checkpoint now also writes an atomic, human-readable
+`circuit-assets/season-2026/summary.md`, including an event/status/source/reason
+table, scope discrepancy and preservation result. Initial `inventoryCounts`
+separates valid/invalid assets and existing/missing circuit geometry;
+`remainingMissingGeometry` follows the current pass and `missingQueue` lists
+all incomplete event IDs. Source metadata cache errors are recorded independently
+and a bad disposable catalog can be fetched again; invalid individual session
+rows are ignored. An asset-integrity exception after a preparation failure blocks
+that item safely instead of preventing later events from being processed.
+
+Completed dynamic revisions/current pointers and all existing valid public Austin
+reference files are SHA-256 checked before and after the pass. Partial dynamic
+revisions are intentionally excluded because annotation completion may publish a
+new revision. `preservation.checkedFiles` and `changedFiles` make the scope explicit;
+zero local files produces `no-protected-assets-present`, never a claim that the
+user's three circuits were checked. The report does not automatically restore or
+repair anything found changed. A second run re-inventories real assets before
+trusting queue completion.
+
+```powershell
+Get-Content .\circuit-assets\season-2026\summary.md
+$report = Get-Content .\circuit-assets\season-2026\report.json -Raw | ConvertFrom-Json
+$report.inventoryCounts
+$report.preservation
+$report.missingQueue
+$report.queue | Where-Object { $_.status -notin @('already-prepared','newly-prepared') } |
+    Select-Object name,status,reason,failureCategory,nextRetryAt
+```
+
+The full approved queue is: Australia, China, Japan, Miami, Canada, Monaco,
+Barcelona-Catalunya, Austria, Great Britain, Belgium, Hungary, Netherlands,
+Italy, Spain (Madrid), Azerbaijan, Singapore, United States (Austin), Mexico,
+Brazil, Las Vegas, Qatar and Abu Dhabi. This checkout has none of the user's
+ignored local geometry/annotation assets, so its dry-run cannot subtract Austin,
+Mexico or Suzuka from that list. Local validated inventory will do so.
+
+The second safe resume/dry-run does not establish real completion here: archive
+access remains unauthenticated. Synthetic inventory tests exercise all three
+existing circuit representations, skipped source fetches, immutable file contents,
+malformed metadata recovery, continued processing after integrity errors and
+machine/human report consistency. Real generated asset counts and visual accuracy
+must come from the user's authenticated local run, not these tests.

@@ -137,3 +137,43 @@ class SeasonTests(TestCase):
                 b=bundle();b.update(corners=annotation(b),sectors=annotation(b),complete=True);store.publish(b);return b
             report=run(2026,temp,Path(temp)/'public',lister=lambda y:[catalog_session('Suzuka',13),catalog_session()] if y==2026 else [],preparer=prep,now=NOW,emit=lambda _:None)
             self.assertEqual(seen,['Suzuka','Mexico City']);self.assertEqual(report['summary']['failed'],1);self.assertEqual(report['summary']['newly-prepared'],1)
+
+    def test_machine_and_human_reports_include_inventory_and_protection(self):
+        import json
+        with tempfile.TemporaryDirectory() as temp,patch('bridge.season_preparation.calendar',return_value=small_calendar(('Mexico City',))):
+            publish(temp)
+            report=run(2026,temp,Path(temp)/'public',lister=Mock(),now=NOW,emit=lambda _:None)
+            self.assertEqual(report['inventoryCounts']['existingCircuitGeometry'],1)
+            self.assertEqual(report['inventoryCounts']['missingCircuitGeometry'],0)
+            self.assertEqual(report['preservation']['state'],'unchanged')
+            self.assertEqual(report['preservation']['checkedFiles'],2)
+            markdown=(Path(temp)/'season-2026'/'summary.md').read_text()
+            self.assertIn('Mexico City | already-prepared',markdown)
+            self.assertIn('Protected assets: unchanged',markdown)
+            self.assertEqual(json.loads((Path(temp)/'season-2026'/'report.json').read_text())['summary'],report['summary'])
+
+    def test_malformed_session_cache_refreshes_and_does_not_abort_batch(self):
+        with tempfile.TemporaryDirectory() as temp,patch('bridge.season_preparation.calendar',return_value=small_calendar(('Suzuka',))):
+            directory=Path(temp)/'season-2026';directory.mkdir();(directory/'sessions-2026.json').write_text('{invalid')
+            fetch=Mock(return_value=[])
+            report=run(2026,temp,Path(temp)/'public',lister=fetch,now=NOW,emit=lambda _:None,fallback_years=0)
+            self.assertEqual(fetch.call_count,1)
+            self.assertIn('2026',report['metadataCacheErrors']);self.assertEqual(report['summary']['unavailable'],1)
+
+    def test_malformed_session_rows_are_ignored_and_source_schema_errors_reported(self):
+        event={'aliases':['Suzuka']}
+        self.assertEqual(session_candidates(event,[None,{'circuit':['unexpected']},{},{**catalog_session('Suzuka',13),'start':42}],2026,NOW),[])
+        with tempfile.TemporaryDirectory() as temp,patch('bridge.season_preparation.calendar',return_value=small_calendar(('Suzuka',))):
+            report=run(2026,temp,Path(temp)/'public',lister=lambda _: {'unexpected':'PRIVATE'},now=NOW,emit=lambda _:None,fallback_years=0)
+            self.assertIn('2026',report['discoveryErrors']);self.assertNotIn('PRIVATE',str(report))
+
+    def test_asset_integrity_failure_in_exception_handler_does_not_stop_next_event(self):
+        with tempfile.TemporaryDirectory() as temp,patch('bridge.season_preparation.calendar',return_value=small_calendar(('Suzuka','Mexico City'))):
+            calls=[]
+            def prep(session,store,report):
+                calls.append(session['location'])
+                raise ValueError('PRIVATE')
+            with patch('bridge.season_preparation.AssetStore.get',side_effect=ValueError('PRIVATE corrupt pointer')):
+                result=run(2026,temp,Path(temp)/'public',lister=lambda _:[catalog_session('Suzuka',13),catalog_session()],preparer=prep,now=NOW,emit=lambda _:None)
+            self.assertEqual(calls,['Suzuka','Mexico City']);self.assertEqual(result['summary']['blocked'],2)
+            self.assertNotIn('PRIVATE',str(result))

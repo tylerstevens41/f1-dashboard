@@ -1,0 +1,236 @@
+{
+  "schema": "season-calendar-v1",
+  "year": 2026,
+  "scope": "user-approved-22-events",
+  "retrievedAt": "2026-11-07T21:27:39.425542+00:00",
+  "sources": [
+    "https://www.formula1.com/en/racing/2026",
+    "https://www.fia.com/news/fia-and-formula-1-announce-2026-calendar",
+    "https://www.formula1.com/en/latest/article/bahrain-and-saudi-arabian-grands-prix-will-not-take-place-in-april.1hnqllVG85RSt8pbFc5Ivx.1hnqllVG85RSt8pbFc5Ivx",
+    "https://admin.fia.com/news/fia-and-fom-confirm-malaysia-will-join-2026-calendar-host-venue-bahrain-grand-prix"
+  ],
+  "discrepancy": "Official November schedule lists 23 rounds including the restored Bahrain-branded Sepang event. User explicitly selected the 22-event scope excluding Bahrain/Saudi events. This is a preparation scope, not a claim that the latest official calendar has 22 rounds.",
+  "excluded": [
+    "Bahrain/Sakhir",
+    "Saudi Arabia/Jeddah",
+    "Bahrain at Sepang (explicit scope exclusion)"
+  ],
+  "events": [
+    {
+      "id": "melbourne",
+      "name": "Australia",
+      "venue": "Melbourne",
+      "aliases": [
+        "Australia",
+        "Melbourne",
+        "Australian"
+      ]
+    },
+    {
+      "id": "shanghai",
+      "name": "China",
+      "venue": "Shanghai",
+      "aliases": [
+        "China",
+        "Shanghai",
+        "Chinese"
+      ]
+    },
+    {
+      "id": "suzuka",
+      "name": "Japan",
+      "venue": "Suzuka",
+      "aliases": [
+        "Japan",
+        "Suzuka",
+        "Japanese"
+      ]
+    },
+    {
+      "id": "miami",
+      "name": "Miami",
+      "venue": "Miami",
+      "aliases": [
+        "Miami"
+      ]
+    },
+    {
+      "id": "montreal",
+      "name": "Canada",
+      "venue": "Montreal",
+      "aliases": [
+        "Canada",
+        "Montreal",
+        "Canadian"
+      ]
+    },
+    {
+      "id": "monte-carlo",
+      "name": "Monaco",
+      "venue": "Monte Carlo",
+      "aliases": [
+        "Monaco",
+        "Monte Carlo"
+      ]
+    },
+    {
+      "id": "barcelona",
+      "name": "Barcelona-Catalunya",
+      "venue": "Barcelona",
+      "aliases": [
+        "Barcelona-Catalunya",
+        "Barcelona",
+        "Catalunya",
+        "Catalonia"
+      ]
+    },
+    {
+      "id": "spielberg",
+      "name": "Austria",
+      "venue": "Spielberg",
+      "aliases": [
+        "Austria",
+        "Spielberg",
+        "Austrian"
+      ]
+    },
+    {
+      "id": "silverstone",
+      "name": "Great Britain",
+      "venue": "Silverstone",
+      "aliases": [
+        "Great Britain",
+        "Silverstone",
+        "British",
+        "United Kingdom"
+      ]
+    },
+    {
+      "id": "spa-francorchamps",
+      "name": "Belgium",
+      "venue": "Spa-Francorchamps",
+      "aliases": [
+        "Belgium",
+        "Spa-Francorchamps",
+        "Belgian",
+        "Spa"
+      ]
+    },
+    {
+      "id": "budapest",
+      "name": "Hungary",
+      "venue": "Budapest",
+      "aliases": [
+        "Hungary",
+        "Budapest",
+        "Hungarian"
+      ]
+    },
+    {
+      "id": "zandvoort",
+      "name": "Netherlands",
+      "venue": "Zandvoort",
+      "aliases": [
+        "Netherlands",
+        "Zandvoort",
+        "Dutch"
+      ]
+    },
+    {
+      "id": "monza",
+      "name": "Italy",
+      "venue": "Monza",
+      "aliases": [
+        "Italy",
+        "Monza",
+        "Italian"
+      ]
+    },
+    {
+      "id": "madrid",
+      "name": "Spain",
+      "venue": "Madrid",
+      "aliases": [
+        "Spain",
+        "Madrid",
+        "Spanish"
+      ]
+    },
+    {
+      "id": "baku",
+      "name": "Azerbaijan",
+      "venue": "Baku",
+      "aliases": [
+        "Azerbaijan",
+        "Baku"
+      ]
+    },
+    {
+      "id": "singapore",
+      "name": "Singapore",
+      "venue": "Singapore",
+      "aliases": [
+        "Singapore"
+      ]
+    },
+    {
+      "id": "austin",
+      "name": "United States",
+      "venue": "Austin",
+      "aliases": [
+        "United States",
+        "Austin",
+        "COTA",
+        "Circuit of the Americas"
+      ]
+    },
+    {
+      "id": "mexico-city",
+      "name": "Mexico",
+      "venue": "Mexico City",
+      "aliases": [
+        "Mexico",
+        "Mexico City",
+        "Mexican"
+      ]
+    },
+    {
+      "id": "sao-paulo",
+      "name": "Brazil",
+      "venue": "Sao Paulo",
+      "aliases": [
+        "Brazil",
+        "Sao Paulo",
+        "Brazilian",
+        "Interlagos"
+      ]
+    },
+    {
+      "id": "las-vegas",
+      "name": "Las Vegas",
+      "venue": "Las Vegas",
+      "aliases": [
+        "Las Vegas"
+      ]
+    },
+    {
+      "id": "lusail",
+      "name": "Qatar",
+      "venue": "Lusail",
+      "aliases": [
+        "Qatar",
+        "Lusail",
+        "Losail"
+      ]
+    },
+    {
+      "id": "yas-marina",
+      "name": "Abu Dhabi",
+      "venue": "Yas Marina",
+      "aliases": [
+        "Abu Dhabi",
+        "Yas Marina"
+      ]
+    }
+  ]
+}

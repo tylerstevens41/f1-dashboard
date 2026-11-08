@@ -14,6 +14,20 @@ def compressed(value):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_car_ahead_interval_survives_shared_live_test_normalization(self):
+        for mode in ('LIVE', 'TEST'):
+            state = RaceState(mode)
+            state.ingest('TimingData', {'Lines': {'2': {'Position': '2', 'GapToLeader': '+9.000',
+                         'IntervalToPositionAhead': {'Value': '+0.500'}}}})
+            state.ingest('TimingData', {'Lines': {'2': {'IntervalToPositionAhead': {'Value': '+1 LAP'}}}})
+            line = state.topics['TimingData']['2']
+            self.assertEqual(line['GapToLeader'], '+9.000')
+            self.assertEqual(line['IntervalToPositionAhead']['Value'], '+1 LAP')
+            state.ingest('TimingData', {'Lines': {'2': {'Position': '1'}}})
+            self.assertEqual(state.topics['TimingData']['2']['IntervalToPositionAhead']['Value'], '+1 LAP')
+            state.ingest('TimingData', {'Lines': {'2': {'IntervalToPositionAhead': {'Value': None}}}})
+            self.assertIsNone(state.topics['TimingData']['2']['IntervalToPositionAhead']['Value'])
+
     def test_nested_array_delta_deletion_and_null(self):
         original = {'Stints':[{'Compound':'MEDIUM','TotalLaps':4}], 'Other':7}
         merged = merge(original,{'Stints':{'0':{'TotalLaps':5},'1':{'Compound':'HARD'}}})

@@ -1,3 +1,4 @@
+import {intervalToAhead} from "./race/timingPresentation";
 import TyreIcon from "./race/TyreIcon";
 import {liveTrackingStatus} from "./race/liveStatus";
 import LiveControls from "./race/LiveControls";
@@ -474,15 +475,17 @@ function SessionContent({feed,developer=false}) {
             }}
           >
             <table
+              className="live-timing-table"
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
                 color: "#ffffff",
                 fontSize: 11,
                 whiteSpace: "nowrap",
-                tableLayout: "auto",
+                tableLayout: "fixed",
               }}
             >
+              <colgroup>{[5,18,11,17,11,19,19].map((width,index)=><col key={index} style={{width:`${width}%`}}/>)}</colgroup>
               <thead>
                 <tr
                   style={{
@@ -497,13 +500,16 @@ function SessionContent({feed,developer=false}) {
                     "DRIVER",
                     "GAP",
                     "TYRE",
+                    "INT",
                     "BEST LAP",
                     "LAST LAP",
                   ].map((heading) => (
                     <th
                       key={heading}
+                      scope="col"
+                      title={heading === "INT" ? "Interval to the car ahead" : undefined}
                       style={{
-                        padding: "0 6px",
+                        padding: "0 2px",
                         height: columnHeaderHeight,
                         borderBottom:
                           "1px solid #292d35",
@@ -574,7 +580,7 @@ function SessionContent({feed,developer=false}) {
                       {/* POSITION */}
                       <td
                         style={{
-                          padding: "0 6px",
+                          padding: "0 2px",
                           height: rowHeight,
                         }}
                       >
@@ -586,7 +592,7 @@ function SessionContent({feed,developer=false}) {
                       {/* DRIVER + TEAM LOGO */}
                       <td
                         style={{
-                          padding: "0 6px",
+                          padding: "0 2px",
                           height: rowHeight,
                         }}
                       >
@@ -631,7 +637,7 @@ function SessionContent({feed,developer=false}) {
                       {/* GAP / PIT / OUT */}
                       <td
                         style={{
-                          padding: "0 6px",
+                          padding: "0 2px",
                           height: rowHeight,
                         }}
                       >
@@ -654,17 +660,20 @@ function SessionContent({feed,developer=false}) {
                       {/* TYRE */}
                       <td
                         style={{
-                          padding: "0 6px",
+                          padding: "0 2px",
                           height: rowHeight,
                         }}
                       >
                         <TyreDisplay data={tyre} />
                       </td>
 
+                      {/* Authoritative interval to the car ahead, separate from leader GAP. */}
+                      <td style={{padding: "0 2px", height: rowHeight}}>{intervalToAhead(timing,driver.position)}</td>
+
                       {/* BEST LAP */}
                       <td
                         style={{
-                          padding: "0 6px",
+                          padding: "0 2px",
                           height: rowHeight,
                         }}
                       >
@@ -674,7 +683,7 @@ function SessionContent({feed,developer=false}) {
                       {/* LAST LAP */}
                       <td
                         style={{
-                          padding: "0 6px",
+                          padding: "0 2px",
                           height: rowHeight,
                         }}
                       >

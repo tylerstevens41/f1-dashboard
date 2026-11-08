@@ -81,3 +81,32 @@ attempted but the host denied its process socket creation; no screenshots or rea
 authenticated LIVE visual verification are claimed. Verify 16:9 fit and real tyre
 changes locally. No backend lifecycle, transport, calibration or animation code
 is changed by this milestone.
+
+## Timing tower refinement
+
+Column order: POS → DRIVER → GAP → TYRE → INT → BEST LAP → LAST LAP.
+GAP remains `TimingData.Lines[number].GapToLeader`. INT reads only
+`TimingData.Lines[number].IntervalToPositionAhead.Value` (flattened by the
+existing presentation adapter to `IntervalToPositionAhead_Value`). The installed
+LiveF1 library also recognizes this field in its timing processing. Our existing
+raw nested pipeline preserves it without numeric conversion, including lap-based
+strings. No new subscription, provider, or leader-gap subtraction is involved.
+The leader and missing/empty/malformed values show an em dash. Provider strings
+such as `+1 LAP` are retained. LIVE and historical TEST use the same component;
+interval updates and running order remain keyed by driver number.
+
+Tyre age retains its existing source, suffix and missing-value handling, but now
+inherits the primary row font size/family, uses weight 700 and tabular numerals,
+and stays centered beside the unchanged SVG with a 3px gap. The tower/circuit
+split remains unchanged. Seven fixed-layout percentage columns sum to 100%, cell
+padding is reduced from 6px to 2px per side, and numeric values/headers align
+right. Below a 440px tower width, primary row values including age use 10px;
+normal rows remain 11px. Unusually long provider values wrap rather than widening
+or clipping the table. Narrow screens may therefore have taller rows.
+
+To verify locally, pull this same branch, restart Vite and use your existing
+LIVE or TEST session. Confirm GAP and INT differ, the leader shows a dash, tyre
+age is bold beside the SVG, and all seven columns fit your normal resolution.
+Repeat at a narrower viewport and check long lap-based strings. Automated SSR
+and CSS/layout-contract tests do not establish pixel-perfect browser fit or real
+LIVE interval availability; those remain local checks.

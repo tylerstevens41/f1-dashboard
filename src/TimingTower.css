@@ -571,8 +571,20 @@
   letter-spacing: 0.5px;
 }
 
-.live-tyre-display { display: inline-flex; align-items: center; justify-content: flex-start; gap: 5px; vertical-align: middle; min-width: 44px; }
+.live-tyre-display { display: inline-flex; align-items: center; justify-content: flex-start; gap: 3px; vertical-align: middle; min-width: 0; }
 .live-tyre-icon { display: block; width: 24px; height: 24px; object-fit: contain; flex: 0 0 24px; }
-.live-tyre-age { font-size: 10px; color: #c6cad3; }
+.live-tyre-age { font-family: inherit; font-size: inherit; font-weight: 700; font-variant-numeric: tabular-nums; color: #e0e3e9; }
 .live-tyre-missing { color: #7d8492; display: inline-block; width: 24px; text-align: center; }
 @media (max-height: 800px) { .live-tyre-icon { width: 20px; height: 20px; flex-basis: 20px; } }
+
+/* Keep the existing tower width; distribute seven compact columns within it.
+   Unusually long provider strings may wrap instead of widening/clipping the table. */
+.live-session-tower { container-type: inline-size; }
+.live-timing-table { font-variant-numeric: tabular-nums; }
+.live-timing-table th, .live-timing-table td { white-space: normal; overflow-wrap: anywhere; }
+.live-timing-table th:nth-child(n+3), .live-timing-table td:nth-child(n+3) { text-align: right; }
+.live-timing-table th:nth-child(4), .live-timing-table td:nth-child(4) { text-align: center; }
+.live-timing-table .live-tyre-display { white-space: nowrap; }
+@container (max-width: 440px) {
+  .live-timing-table { font-size: 10px !important; }
+}

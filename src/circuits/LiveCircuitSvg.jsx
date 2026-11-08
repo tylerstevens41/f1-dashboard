@@ -107,7 +107,7 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
     setPreviewCalculated(false);setPreview(true);setDraft(value);try{localStorage.setItem(`f1-annotations-${circuit.id}-${circuit.layoutVersion}-${value.geometryId}`,JSON.stringify(value));}catch{ /* storage optional */ }};
   const changeAppearance=value=>{setAppearance(value);try{localStorage.setItem('f1-track-appearance',JSON.stringify(value));}catch{ /* storage optional */ }};
   const place=event=>{
-    if(!placing||!geometry||!annotations)return;
+    if(readOnly||!placing||!geometry||!annotations)return;
     event.stopPropagation();
     try {
       const svg=event.currentTarget,point=svg.createSVGPoint();point.x=event.clientX;point.y=event.clientY;
@@ -136,23 +136,23 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
   const status=calibration?.status??'missing';
   return <div className="live-circuit-shell">
     <div className="live-circuit-toolbar"><strong>{circuit.name}</strong>
-      <span className={`calibration-status ${status}`}>Calibration: {status==='candidate'?'unverified candidate':status}</span>
-      <label><input type="checkbox" checked={labels} onChange={e=>setLabels(e.target.checked)}/>Labels</label>
-      {!readOnly && import.meta.env.DEV && <button aria-pressed={debug} onClick={()=>setDebug(v=>!v)}>GPS calibration overlay</button>}
+      {!readOnly && <span className={`calibration-status ${status}`}>Calibration: {status==='candidate'?'unverified candidate':status}</span>}
+      {!readOnly && <label><input type="checkbox" checked={labels} onChange={e=>setLabels(e.target.checked)}/>Labels</label>}
+      {!readOnly && <button aria-pressed={debug} onClick={()=>setDebug(v=>!v)}>GPS calibration overlay</button>}
     </div>
-    {!readOnly && import.meta.env.DEV && debug && <div className="calibration-debug-panel">
+    {!readOnly && debug && <div className="calibration-debug-panel">
       <LayerControls layers={layers} setLayers={setLayers}/>
       <p>Orange: raw/native GPS. Cyan: accepted GPS after mapping. Purple: original SVG registered to GPS. Unregistered SVG is a visual comparison only.</p>
       <p>{calibration?`Layout ${calibration.layoutVersion} · ${calibration.svgComparison?.decision} · held-out p95 ${calibration.validation?.heldOut?.p95?.toFixed(1)} feed units`:'No calibration artifact. Run the local collection/build commands; legacy reference is unverified.'}</p>
       <p>Start/finish: {calibration?.startFinish?.status??'not established'}. No car is snapped to this path.</p>
       <button onClick={()=>setRevision(v=>v+1)}>Reload calibration JSON</button>
     </div>}
-    {!readOnly && import.meta.env.DEV && geometry && annotations && <><AppearancePanel value={appearance} onChange={changeAppearance} preview={preview} setPreview={setPreview}/><AnnotationEditor circuit={circuit} geometry={geometry} value={annotations} onChange={changeAnnotations} placing={placing} setPlacing={setPlacing} onSelect={setSelection}/><button onClick={()=>setRevision(v=>v+1)}>Reload annotation files</button><div className="calibration-debug-panel">Annotations: {[annotations.startFinish,annotations.sector1End,annotations.sector2End].every(x=>x?.status==='verified')?'verified': 'unverified / incomplete'} · {annotations.corners.length} corners · FastF1 alignment: {annotations.alignment?.status??'not loaded'} · held-out RMS {annotations.alignment?.heldOutRms?.toFixed(1)??'—'}, p95 {annotations.alignment?.heldOutP95?.toFixed(1)??'—'} native units · {placing?'click track to place':''}</div></>}
-    {!readOnly && import.meta.env.DEV && animation && <AnimationDiagnostics animation={animation}/>}
-    {sourceStorageError && <p role="alert" className="calibration-error">{sourceStorageError}</p>}
-    {(placementError||annotations?.loadError) && <p role="alert" className="calibration-error">{placementError||annotations.loadError}</p>}
-    {!readOnly && import.meta.env.DEV && annotations?.boundaryDiagnostics && <div className="calibration-debug-panel">Source calculation: provisional · {annotations.boundaryDiagnostics.validLaps} laps / {annotations.boundaryDiagnostics.drivers} drivers · {Object.values(annotations.boundaryDiagnostics.rejected??{}).reduce((a,b)=>a+b,0)} rejected · {annotations.sectorSource?.year} {annotations.sectorSource?.event} {annotations.sectorSource?.session} · FIA: {annotations.boundaryDiagnostics.fia?.status}<br/>{['startFinish','sector1End','sector2End'].map(k=><span key={k}>{k}: {annotations[k]?.at.toFixed(5)??'overridden / hidden'} · p95 {annotations[k]?.sourceEstimate?.statistics?.p95NativeDistance?.toFixed(1)??'—'} native units · {annotations[k]?.sourceEstimate?.statistics?.accepted??'—'} kept / {annotations[k]?.sourceEstimate?.statistics?.outliers??'—'} outliers; </span>)}<br/>{annotations.boundaryDiagnostics.fia?.warnings?.join(' · ')}</div>}
-    {!readOnly && import.meta.env.DEV && annotations && geometry && <details className="circuit-dev-panel"><summary>Boundary accuracy and display audit</summary>
+    {!readOnly && geometry && annotations && <><AppearancePanel value={appearance} onChange={changeAppearance} preview={preview} setPreview={setPreview}/><AnnotationEditor circuit={circuit} geometry={geometry} value={annotations} onChange={changeAnnotations} placing={placing} setPlacing={setPlacing} onSelect={setSelection}/><button onClick={()=>setRevision(v=>v+1)}>Reload annotation files</button><div className="calibration-debug-panel">Annotations: {[annotations.startFinish,annotations.sector1End,annotations.sector2End].every(x=>x?.status==='verified')?'verified': 'unverified / incomplete'} · {annotations.corners.length} corners · FastF1 alignment: {annotations.alignment?.status??'not loaded'} · held-out RMS {annotations.alignment?.heldOutRms?.toFixed(1)??'—'}, p95 {annotations.alignment?.heldOutP95?.toFixed(1)??'—'} native units · {placing?'click track to place':''}</div></>}
+    {!readOnly && animation && <AnimationDiagnostics animation={animation}/>}
+    {!readOnly && sourceStorageError && <p role="alert" className="calibration-error">{sourceStorageError}</p>}
+    {!readOnly && (placementError||annotations?.loadError) && <p role="alert" className="calibration-error">{placementError||annotations.loadError}</p>}
+    {!readOnly && annotations?.boundaryDiagnostics && <div className="calibration-debug-panel">Source calculation: provisional · {annotations.boundaryDiagnostics.validLaps} laps / {annotations.boundaryDiagnostics.drivers} drivers · {Object.values(annotations.boundaryDiagnostics.rejected??{}).reduce((a,b)=>a+b,0)} rejected · {annotations.sectorSource?.year} {annotations.sectorSource?.event} {annotations.sectorSource?.session} · FIA: {annotations.boundaryDiagnostics.fia?.status}<br/>{['startFinish','sector1End','sector2End'].map(k=><span key={k}>{k}: {annotations[k]?.at.toFixed(5)??'overridden / hidden'} · p95 {annotations[k]?.sourceEstimate?.statistics?.p95NativeDistance?.toFixed(1)??'—'} native units · {annotations[k]?.sourceEstimate?.statistics?.accepted??'—'} kept / {annotations[k]?.sourceEstimate?.statistics?.outliers??'—'} outliers; </span>)}<br/>{annotations.boundaryDiagnostics.fia?.warnings?.join(' · ')}</div>}
+    {!readOnly && annotations && geometry && <details className="circuit-dev-panel"><summary>Boundary accuracy and display audit</summary>
       <p>Precision is lap-to-lap spread. Accuracy remains unverified without registered independent physical timing lines. Current file warnings may use older FIA reference values; revalidate locally.</p>
       <label>Load candidate sector JSON (memory only) <input type="file" accept=".json,application/json" onChange={async e=>{
         try {const file=e.target.files?.[0];if(!file)return;if(file.size>16*1024*1024)throw Error('Too large');const data=validateAnnotations(JSON.parse(await file.text()),circuit,geometry);setCandidateSectors(data);setPreviewCalculated(true);setPlacementError('');}
@@ -163,19 +163,20 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
       {auditRows.map(row=><p key={row.key}>{row.key}: calculated {row.calculatedAt?.toFixed(6)??'missing'} · displayed {row.displayedAt?.toFixed(6)??'hidden'} · {row.origin}{row.different?' · OVERRIDE DIFFERS FROM CALCULATION':''}</p>)}
       <button onClick={()=>downloadAudit(browserBoundaryAudit(displayAnnotations,geometry,auditRows,circuitSvg.current))}>Export safe browser boundary audit</button>
     </details>}
-    {compatibility && !readOnly && import.meta.env.DEV && <p>Recent drivers (2.5s): {compatibility.recentDrivers??compatibility.samples} · newest GPS age: {compatibility.newestSampleAgeMs==null?'—':Math.round(compatibility.newestSampleAgeMs)+' ms'} · last alignment success: {compatibility.lastSuccessMs==null?'—':Math.round(clockMs-compatibility.lastSuccessMs)+' ms ago'} · rejected evidence: {JSON.stringify(compatibility.rejected??{})}</p>}
-    {compatibility && <p role={compatibility.status==='incompatible'?'alert':undefined} className="calibration-status">{mode} GPS compatibility: {compatibility.status} · {compatibility.samples} alignment-evidence drivers · p95 {compatibility.p95FractionOfDiagonal==null?'—':`${(compatibility.p95FractionOfDiagonal*100).toFixed(2)}% of extent`}. {!(compatibility.allowed??compatibility.status==='compatible-sample')?'Alignment not validated; markers withheld. No snapping or historical substitution.':'Geometry alignment retained for this session; individual GPS freshness still controls markers.'}</p>}
+    {compatibility && !readOnly && <p>Recent drivers (2.5s): {compatibility.recentDrivers??compatibility.samples} · newest GPS age: {compatibility.newestSampleAgeMs==null?'—':Math.round(compatibility.newestSampleAgeMs)+' ms'} · last alignment success: {compatibility.lastSuccessMs==null?'—':Math.round(clockMs-compatibility.lastSuccessMs)+' ms ago'} · rejected evidence: {JSON.stringify(compatibility.rejected??{})}</p>}
+    {compatibility && !readOnly && <p role={compatibility.status==='incompatible'?'alert':undefined} className="calibration-status">{mode} GPS compatibility: {compatibility.status} · {compatibility.samples} alignment-evidence drivers · p95 {compatibility.p95FractionOfDiagonal==null?'—':`${(compatibility.p95FractionOfDiagonal*100).toFixed(2)}% of extent`}. {!(compatibility.allowed??compatibility.status==='compatible-sample')?'Alignment not validated; markers withheld. No snapping or historical substitution.':'Geometry alignment retained for this session; individual GPS freshness still controls markers.'}</p>}
+    {readOnly && compatibility && !compatibility.allowed && compatibility.status!=='compatible-sample' && <p role="status">{compatibility.status==='incompatible'?'Position data does not match this circuit.':'Waiting for compatible driver positions…'}</p>}
     {error && <p role="alert" className="calibration-error">{error}</p>}
     <div className="live-circuit-viewport">
       {geometry?<CircuitRenderer geometry={geometry} circuit={circuit} drivers={layers.drivers&&(!compatibility||(compatibility.allowed??compatibility.status==='compatible-sample'))?markers.filter(d=>!compatibility?.blockedDrivers?.includes(String(d.driver_number))):[]}
         selectedDriver={selectedDriver} onSelectDriver={onSelectDriver} animate animation={animation}
         showLabels={labels} showTrack={!debug||layers.outline} annotations={displayAnnotations} svgRef={circuitSvg} appearance={appearance}
-        annotationsCalibrated={true} previewProvisional={!readOnly && import.meta.env.DEV && preview} annotationSelection={selection} editingAnnotations={!readOnly && import.meta.env.DEV && Boolean(placing)} onClick={place}>
-        {!readOnly && import.meta.env.DEV && showAuditAnchors && <g pointerEvents="none" data-layer="audit-anchors">
+        annotationsCalibrated={true} previewProvisional={!readOnly && preview} annotationSelection={selection} editingAnnotations={!readOnly && Boolean(placing)} onClick={place}>
+        {!readOnly && showAuditAnchors && <g pointerEvents="none" data-layer="audit-anchors">
           {annotations.corners.map(c=>{const p=pointAt(geometry,c.at);return <g key={`${c.number}${c.letter??''}`}><circle cx={p.x} cy={p.y} r="50" fill="#ff9f43"/><text x={p.x+70} y={p.y-70} fontSize="140" fill="#ff9f43">anchor {c.number}{c.letter}</text></g>;})}
           {auditRows.filter(r=>r.calculatedPoint).map(r=><g key={r.key}><circle cx={r.calculatedPoint.x} cy={r.calculatedPoint.y} r="110" stroke="#38ffac" fill="none" strokeWidth="25"/><text x={r.calculatedPoint.x+120} y={r.calculatedPoint.y-120} fontSize="150" fill="#38ffac">calculated {r.key}</text></g>)}
         </g>}
-        {!readOnly && import.meta.env.DEV && debug && <CalibrationLayers calibration={calibration} geometry={geometry} circuit={circuit} layers={layers}/>}
+        {!readOnly && debug && <CalibrationLayers calibration={calibration} geometry={geometry} circuit={circuit} layers={layers}/>}
       </CircuitRenderer>:<p>Loading circuit geometry…</p>}
     </div>
     <div className="live-circuit-bottom">{markers.length} drivers with fresh GPS · {mode} · adaptive timestamp interpolation · {status!=='verified'?'alignment not verified':'validated layout; recheck after event/layout changes'}</div>

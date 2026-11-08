@@ -31,13 +31,13 @@ export function preparedCircuit(bundle) {
 }
 // Measured source positions are compared with the outline, never snapped to it.
 // This checks alignment, not proof of full-lap coverage or physical annotations.
-export function gpsCompatibility(geometry,drivers,clockMs,minimum=5) {
+export function gpsCompatibility(geometry,drivers,clockMs,minimum=5,maxAgeMs=2500) {
   const errors=[];
   const diagonal=Math.hypot(geometry.width-1300,geometry.height-1300);
   for(const driver of drivers){
     if(driver.timing?.InPit===true||driver.timing?.PitIn===true)continue;
     const gps=driver.gps;
-    if(!gps||![gps.X,gps.Y,gps._sampleTimeMs,clockMs].every(Number.isFinite)||clockMs-gps._sampleTimeMs>2500||clockMs-gps._sampleTimeMs< -2000||String(gps.Status??'OnTrack').toLowerCase()!=='ontrack')continue;
+    if(!gps||![gps.X,gps.Y,gps._sampleTimeMs,clockMs].every(Number.isFinite)||clockMs-gps._sampleTimeMs>maxAgeMs||clockMs-gps._sampleTimeMs< -2000||String(gps.Status??'OnTrack').toLowerCase()!=='ontrack')continue;
     const p=geometry.project(gps.X,gps.Y);
     let best=Infinity;
     for(let i=1;i<geometry.points.length;i++){

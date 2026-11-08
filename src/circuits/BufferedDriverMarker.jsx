@@ -10,7 +10,7 @@ export default function BufferedDriverMarker({ driver, selected, showLabel, onSe
       marker.current.dataset.motionState=output.state;
       if(output.point){
         const p=project(output.point.x,output.point.y);
-        if(p)marker.current.setAttribute('transform',`translate(${p.x} ${p.y})`);
+        if(p){marker.current.setAttribute('transform',`translate(${p.x} ${p.y})`);animation.markerRendered?.(driver.driver_number,performance.now());}
       }
     });
   },[animation,driver.driver_number,project]);

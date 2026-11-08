@@ -75,3 +75,14 @@ class ManualLiveTests(unittest.IsolatedAsyncioTestCase):
                 await bridge.command(None,{'action':'circuit-lookup','year':2026})
             bridge.asset_store.lookup.assert_called_once_with(2026,None,'42')
         self.assertEqual(bridge.send.call_args_list[0].args[1]['type'],'circuit-assets')
+
+    async def test_live_gps_diagnostics_count_identity_drops_without_exposing_payload(self):
+        bridge=Bridge();bridge.broadcast=AsyncMock()
+        bridge.live_expected={'path':'current'};bridge.live_confirmed=False
+        await bridge.emit('Position.z',{'PRIVATE_PROVIDER_DATA':'not exported'})
+        self.assertEqual(bridge.gps_diagnostics['rawMessages'],1)
+        self.assertEqual(bridge.gps_diagnostics['identityDrops'],1)
+        self.assertIsNotNone(bridge.gps_diagnostics['rawReceivedUtcMs'])
+        self.assertNotIn('PRIVATE',str(bridge.transport_message('status')))
+        await bridge.begin_live_snapshot()
+        self.assertEqual(bridge.gps_diagnostics['subscriptionSnapshots'],1)

@@ -38,6 +38,7 @@ export default function AnimationDiagnostics({ animation }) {
     <input aria-label="Interpolation buffer" type="range" min="0" max="5000" step="25" value={buffer} disabled={!manual} onChange={e=>{setBuffer(Number(e.target.value));animation.setBuffer(Number(e.target.value));}}/>
     {stats && <>
       <p>Animation: {stats.phase} · last reset: {stats.resetReason} · last rebuffer: {stats.rebufferReason??'none'} · last new GPS arrival: {stats.lastGpsArrivalMs===null?'none':`${stats.lastGpsArrivalMs.toFixed(0)} ms ago`}</p>
+      <p>Last sample accepted into buffer: {number(stats.lastAcceptedAgeMs)} ms ago · last DOM marker placement: {number(stats.lastMarkerRenderAgeMs)} ms ago. Ages below distinguish source UTC from delayed presentation.</p>
       <p>Playback: {number(stats.sourceTime)} · Presentation: {number(stats.interpolationTime)} · {stats.running?'running':'paused'} {stats.speed}×</p>
       <p>Actual presentation rate: {number(stats.presentationRate)} · clock rate: {number(stats.clockRate)} · backend rate: {number(stats.serverRate)} · phase error: {number(stats.phaseErrorMs)} ms · correction: {stats.correctionPpm} ppm</p>
       <p>Position delivery: {stats.deliveryHz?.toFixed(1)??'—'} Hz · GPS delivery age p95: {stats.deliveryAgeMs.toFixed(0)} ms · locked buffer: {stats.bufferMs.toFixed(0)} ms · recommended: {stats.recommendedMs.toFixed(0)} ms · effective delay: {number(stats.effectiveDelayMs)} ms · rebuffers: {stats.rebuffers} · underruns: {stats.underruns}</p>
@@ -46,7 +47,7 @@ export default function AnimationDiagnostics({ animation }) {
       <Plot rows={stats.trace} title="Timeline rate / selected playback speed" fields={[["presentationRate","#48dfff"],["clockRate","#ffbd48"]]} normalize/>
       <Plot rows={stats.trace} title="Source-implied and rendered speed (native units/source second)" fields={[["sourcePathSpeed","#48df99"],["renderedPathSpeed","#48dfff"],["renderedChordSpeed","#ffbd48"]]}/>
       <table><thead><tr>{['Driver','Hz','Buffered','Motion','Rejected','Underruns'].map(h=><th key={h}>{h}</th>)}</tr></thead>
-        <tbody>{stats.drivers.map(d=><tr key={d.number}><td>{d.number}</td><td>{d.frequencyHz?.toFixed(1)??'—'}</td><td>{d.buffered}</td><td>{d.state}</td><td>{d.rejected}</td><td>{d.underruns}</td></tr>)}</tbody></table>
+        <tbody>{stats.drivers.map(d=><tr key={d.number}><td>{d.number}</td><td>{d.frequencyHz?.toFixed(1)??'—'}</td><td>{d.buffered}</td><td>{d.state}</td><td>{d.rejected} {JSON.stringify(d.rejectionReasons)} · UTC age {number(d.sourceSampleAgeMs)} ms · presentation age {number(d.presentationSampleAgeMs)} ms</td><td>{d.underruns}</td></tr>)}</tbody></table>
       <p>Trace records while this panel is open (up to 3,600 frames). Speeds come from GPS chords and timestamps, not validated vehicle telemetry. CSV includes source intervals/repeated coordinates, phase error, rates and buffer measurements. Waiting means the presentation cursor has reached the newest sample. Recovering hides a marker while late GPS is reacquired; larger measured delivery age may increase the automatic recommendation. Flat clock rates with pulsing source speeds implicate source sampling; chord/path differences at corners identify polyline effects.</p>
     </>}
   </details>;

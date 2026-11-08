@@ -1,3 +1,4 @@
+import {CompatibilityTracker} from './compatibilityTracker';
 import {gpsCompatibility} from './prepared';
 import AnimationDiagnostics from '../animation/AnimationDiagnostics';
 import { useEffect, useMemo, useState, useRef } from 'react';
@@ -128,7 +129,8 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
         color:/^[0-9a-f]{6}$/i.test(raw)?`#${raw}`:'#FFFFFF',label:driver.name_acronym??driver.driver_number}];
     });
   },[drivers,geometry]);
-  const compatibility=useMemo(()=>geometry&&prepared?gpsCompatibility(geometry,drivers,clockMs):null,[geometry,prepared,drivers,clockMs]);
+  const compatibilityTracker=useMemo(()=>new CompatibilityTracker({geometry,prepared,mode}),[geometry,prepared,mode]);
+  const compatibility=useMemo(()=>geometry&&prepared?(mode==='LIVE'?compatibilityTracker.update(geometry,drivers,clockMs):gpsCompatibility(geometry,drivers,clockMs)):null,[geometry,prepared,drivers,clockMs,mode,compatibilityTracker]);
   if(!circuit)return <p>No configured circuit for {circuitName}.</p>;
   const calibration=loaded?.calibration;
   const status=calibration?.status??'missing';
@@ -161,10 +163,11 @@ export default function LiveCircuitSvg({ animation, circuitName='Austin', mode='
       {auditRows.map(row=><p key={row.key}>{row.key}: calculated {row.calculatedAt?.toFixed(6)??'missing'} · displayed {row.displayedAt?.toFixed(6)??'hidden'} · {row.origin}{row.different?' · OVERRIDE DIFFERS FROM CALCULATION':''}</p>)}
       <button onClick={()=>downloadAudit(browserBoundaryAudit(displayAnnotations,geometry,auditRows,circuitSvg.current))}>Export safe browser boundary audit</button>
     </details>}
-    {compatibility && <p role={compatibility.status==='incompatible'?'alert':undefined} className="calibration-status">{mode} GPS compatibility: {compatibility.status} · {compatibility.samples} recent on-track drivers · p95 {compatibility.p95FractionOfDiagonal==null?'—':`${(compatibility.p95FractionOfDiagonal*100).toFixed(2)}% of extent`}. {compatibility.status!=='compatible-sample'?'Driver markers withheld until fresh GPS aligns; no snapping or historical substitution.':'Sample alignment passed; full live session remains locally unverified.'}</p>}
+    {compatibility && import.meta.env.DEV && <p>Recent drivers (2.5s): {compatibility.recentDrivers??compatibility.samples} · newest GPS age: {compatibility.newestSampleAgeMs==null?'—':Math.round(compatibility.newestSampleAgeMs)+' ms'} · last alignment success: {compatibility.lastSuccessMs==null?'—':Math.round(clockMs-compatibility.lastSuccessMs)+' ms ago'} · rejected evidence: {JSON.stringify(compatibility.rejected??{})}</p>}
+    {compatibility && <p role={compatibility.status==='incompatible'?'alert':undefined} className="calibration-status">{mode} GPS compatibility: {compatibility.status} · {compatibility.samples} alignment-evidence drivers · p95 {compatibility.p95FractionOfDiagonal==null?'—':`${(compatibility.p95FractionOfDiagonal*100).toFixed(2)}% of extent`}. {!(compatibility.allowed??compatibility.status==='compatible-sample')?'Alignment not validated; markers withheld. No snapping or historical substitution.':'Geometry alignment retained for this session; individual GPS freshness still controls markers.'}</p>}
     {error && <p role="alert" className="calibration-error">{error}</p>}
     <div className="live-circuit-viewport">
-      {geometry?<CircuitRenderer geometry={geometry} circuit={circuit} drivers={layers.drivers&&(!compatibility||compatibility.status==='compatible-sample')?markers:[]}
+      {geometry?<CircuitRenderer geometry={geometry} circuit={circuit} drivers={layers.drivers&&(!compatibility||(compatibility.allowed??compatibility.status==='compatible-sample'))?markers.filter(d=>!compatibility?.blockedDrivers?.includes(String(d.driver_number))):[]}
         selectedDriver={selectedDriver} onSelectDriver={onSelectDriver} animate animation={animation}
         showLabels={labels} showTrack={!debug||layers.outline} annotations={displayAnnotations} svgRef={circuitSvg} appearance={appearance}
         annotationsCalibrated={true} previewProvisional={import.meta.env.DEV && preview} annotationSelection={selection} editingAnnotations={import.meta.env.DEV && Boolean(placing)} onClick={place}>

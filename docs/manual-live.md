@@ -78,3 +78,74 @@ reconnect, dynamic registry, decoder, timing and animation regressions also run.
 No real authenticated LIVE connection or local Brazil circuit asset was available
 in this environment. Do not claim race GPS or browser alignment is verified until
 local fresh telemetry and compatible marker movement are observed.
+
+## LIVE burst/freshness flicker correction
+
+Two reproducible code defects were found after the Brazilian LIVE report:
+
+- `gpsCompatibility` rebuilt a five-driver quorum from samples less than 2,500 ms
+  old on every render. A short delivery gap returned waiting-for-gps and removed
+  the entire marker subtree, even when measured circuit alignment had passed.
+- `AnimationEngine.evaluate` rejected samples older than 2,500 ms against source
+  UTC before checking whether they still bracketed its delayed presentation cursor.
+  Its existing buffer can be as large as 5,000 ms, so valid buffered samples could
+  be declared stale before they were displayed.
+
+A session/geometry-scoped CompatibilityTracker now accumulates at most one latest
+on-track position per driver over a bounded 30-second evidence window. The same
+five-driver minimum and 3%-extent p95 limit still apply; alignment success survives
+missing data within the same source generation. New incompatible evidence blocks
+markers; individually incompatible driver coordinates are withheld. A mode/source
+session/generation remount or geometry change creates a new tracker. No geometry
+approval is reused after reconnect/reset. Retained geometry evidence is **not** a
+claim of fresh telemetry and does not keep stale markers alive.
+
+For LIVE only, the stale check credits the actual source-minus-presentation delay,
+capped by the existing 5-second maximum buffer. It still expires a driver after
+2.5 seconds beyond the delayed cursor and never permits wall-clock sample age
+beyond 7.5 seconds with default settings. TEST thresholds/clocks are unchanged.
+Positions are interpolated only between measured samples; after a buffer underrun
+only the existing bounded hold/recovery behavior applies. No extrapolation,
+track snapping, coordinate recalibration or buffer-target enlargement was added.
+
+### Diagnosing the next authenticated run
+
+Pull the branch, stop the existing backend/Vite processes with Ctrl+C and restart
+using the Windows commands above. Do not rerun circuit preparation or delete any
+assets/caches. Hard-refresh the browser and Start LIVE.
+
+Expand **Development diagnostics** and **Animation diagnostics**. The circuit
+panel shows alignment evidence count, newest GPS UTC age, recent-driver count,
+last actual alignment success age and invalid/future/old/off-track evidence counts.
+The geometry status may read `compatible-retained` during a short delivery gap;
+that is expected. The LIVE strip may independently report stale telemetry.
+
+The diagnostic chain distinguishes:
+
+1. Backend raw Position.z messages and last UTC receipt.
+2. Normalized receipt/sample UTC, driver counts, coordinate rejections, missing
+   source-UTC history and session-identity drops.
+3. Frontend GPS message receipt and local WebSocket opens/closes.
+4. Last interpolation-buffer acceptance age, per-driver rejection reasons,
+   source-UTC sample age versus presentation-cursor age.
+5. Last real geometry-alignment success, not a refresh-driven timestamp.
+6. Last DOM marker placement age (not proof that a browser paint was visible).
+7. Upstream connection attempts/losses and subscription snapshot count, along
+   with the engine reset/rebuffer reason and current session/generation.
+
+Backend/frontend receipt clocks are UTC epoch milliseconds; animation acceptance
+and DOM intervals use the browser monotonic clock. `_sampleTimeMs` derives from
+Position.z Utc (frame UTC fallback exists for records without Utc, but interpolation
+requires actual source history). No arbitrary cross-clock correction is introduced.
+Compare ages, not raw monotonic values with UTC. Large browser/server UTC skew
+still requires checking the local machine clock; it is not silently compensated.
+
+A deterministic regression uses 1-second delivery bursts with measured GPS 3 seconds
+behind source UTC. The old global gate reports waiting and the old animation stale
+check hides valid delayed brackets. The updated pipeline stays interpolating across
+those deliveries; after a true outage the driver expires. Additional tests cover
+asynchronous drivers, retained evidence, incompatible coordinates, fresh epoch
+reset, independent staleness and TEST isolation. This proves the code defects and
+fixture correction, **not** the actual cadence/clock skew of the user's live feed.
+Real authenticated LIVE visual success still requires local confirmation and the
+new diagnostics if flicker remains.

@@ -18,6 +18,7 @@ export default function RaceDevTools({ feed, circuit }) {
     <summary>Development diagnostics · {race.mode} · {race.upstream}</summary>
     <p>WebSocket: {feed.connection} · LiveF1: {race.upstream} · Session: {race.sessionId ?? 'unknown'} · Circuit: {circuit ?? 'unsupported'}</p>
     <p><strong>{race.mode} {race.playback} · Clip {clock(race.playbackInfo?.offsetMs)} / {clock(race.playbackInfo?.durationMs)}</strong> · {race.playbackInfo?.sessionPath ?? race.sessionId ?? 'No session selected'}</p>
+    <p>GPS transport (UTC receipt clocks): frontend {feed.gpsTransport?.positionMessages??0} messages, last received {age(feed.gpsTransport?.lastReceivedUtcMs==null?null:feed.wallClockMs-feed.gpsTransport.lastReceivedUtcMs)} · socket opens/closes {feed.gpsTransport?.socketOpens??0}/{feed.gpsTransport?.socketCloses??0} · backend {JSON.stringify(race.liveDiagnostics??{})}</p>
     <p>Clock basis: {race.clockBasis ?? 'unknown'}</p>
     <p>GPS: {gps.filter(p => validGps(p, clockMs, circuit === 'Austin' ? austin.motion.staleMs : 2500)).length} valid drivers · Last GPS: {age(freshnessAge(race, 'Position.z', clockMs))} · Timing: {age(freshnessAge(race, 'TimingData', clockMs))} · Race control: {age(freshnessAge(race, 'RaceControlMessages', clockMs))}</p>
     <p>Calibration status and measured errors are shown on the circuit panel. {circuit ? 'Use GPS calibration overlay for comparison.' : 'No mapping configured.'}</p>

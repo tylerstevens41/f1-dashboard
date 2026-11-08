@@ -28,6 +28,8 @@ class Bridge:
         self.record_started = None
         self.clip = None
         self.timeline = None
+        self.gps_seen={}
+        self.gps_diagnostics={'rawMessages':0,'rawReceivedUtcMs':None,'normalizedReceivedUtcMs':None,'lastSampleUtcMs':None,'identityDrops':0,'parseErrors':0,'subscriptionSnapshots':0,'connectionAttempts':0,'connectionLosses':0}
         self.offset = 0
         self.last_tick = time.monotonic()
 
@@ -136,6 +138,7 @@ class Bridge:
             info={**info,'offsetMs':offset}
         elif self.state.mode == 'LIVE':
             message['clockMs']=datetime.now(timezone.utc).timestamp()*1000
+        if message.get('type') in ('snapshot','status') and self.state.mode=='LIVE':message['liveDiagnostics']=dict(self.gps_diagnostics)
         message['transportMs']=now*1000
         message['playbackInfo']=info
         return message
@@ -147,12 +150,16 @@ class Bridge:
         return self.stamp_transport(self.state.snapshot())
 
     async def status(self, status):
+        if status=='connecting':self.gps_diagnostics['connectionAttempts']+=1
+        if status in ('disconnected','connection-error','authentication-error'):self.gps_diagnostics['connectionLosses']+=1
         self.state.upstream = status
         await self.broadcast(self.transport_message('status', error=self.error, playbackInfo=self.playback_info()))
 
     async def emit(self, topic, payload, timestamp=None, clock_ms=None):
         if topic not in TOPICS:
             return
+        if self.state.mode=='LIVE' and topic=='Position.z':
+            self.gps_diagnostics['rawMessages']+=1;self.gps_diagnostics['rawReceivedUtcMs']=datetime.now(timezone.utc).timestamp()*1000
         if self.state.mode=='LIVE' and self.live_expected:
             if topic=='SessionInfo':
                 expected=self.live_expected
@@ -164,15 +171,33 @@ class Bridge:
                         info.get('Name')==expected['session'] and str(info['StartDate'])[:10]==str(expected['start'])[:10])
                     self.error=None if self.live_confirmed else 'The current LIVE feed is not the selected session. Waiting; no archive substitution.'
                     await self.status('connected' if self.live_confirmed else 'waiting-session')
-            elif not self.live_confirmed:return
+            elif not self.live_confirmed:
+                if topic=='Position.z':self.gps_diagnostics['identityDrops']+=1
+                return
         if self.recording_path and self.state.mode == 'LIVE':
             self.capture(topic, payload)
         try:
             messages = self.state.ingest(topic, payload, timestamp, clock_ms)
         except (ValueError, KeyError, TypeError):
+            if topic=='Position.z':self.gps_diagnostics['parseErrors']+=1
             self.error = f'Invalid {topic} update; retained previous state.'
             await self.broadcast(self.transport_message('status', error=self.error, playbackInfo=self.playback_info()))
             return
+        if self.state.mode=='LIVE' and topic=='Position.z':
+            positions=self.state.topics.get('Position.z',{})
+            valid=[r.get('_sampleTimeMs') for r in positions.values() if isinstance(r,dict) and isinstance(r.get('_sampleTimeMs'),(int,float))]
+            newest=max(valid) if valid else None
+            changed=0
+            for number,record in positions.items():
+                sample=record.get('_sampleTimeMs') if isinstance(record,dict) else None
+                if isinstance(sample,(int,float)) and sample>self.gps_seen.get(number,float('-inf')):
+                    self.gps_seen[number]=sample;changed+=1
+            if changed:self.gps_diagnostics['normalizedReceivedUtcMs']=datetime.now(timezone.utc).timestamp()*1000
+            self.gps_diagnostics['lastSampleUtcMs']=newest
+            self.gps_diagnostics['normalizedNewDrivers']=changed
+            self.gps_diagnostics['driversWithoutUtcHistory']=sum(not r.get('_history') for r in positions.values() if isinstance(r,dict))
+            self.gps_diagnostics['normalizedDrivers']=len(valid)
+            self.gps_diagnostics['coordinateRejects']=sum(r.get('_rejectedSamples',0) for r in positions.values() if isinstance(r,dict))
         for message in messages:
             await self.broadcast(message)
 
@@ -219,6 +244,9 @@ class Bridge:
         self.source_task = asyncio.create_task(self.run_live())
 
     async def begin_live_snapshot(self):
+        self.gps_seen={}
+        self.gps_diagnostics['subscriptionSnapshots']+=1
+        self.gps_diagnostics.update(rawReceivedUtcMs=None,normalizedReceivedUtcMs=None,lastSampleUtcMs=None)
         self.live_confirmed=self.live_expected is None
         self.state.reset('LIVE')
         self.state.upstream = 'connected'

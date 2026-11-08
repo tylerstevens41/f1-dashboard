@@ -570,3 +570,9 @@
   font-weight: 900;
   letter-spacing: 0.5px;
 }
+
+.live-tyre-display { display: inline-flex; align-items: center; justify-content: flex-start; gap: 5px; vertical-align: middle; min-width: 44px; }
+.live-tyre-icon { display: block; width: 24px; height: 24px; object-fit: contain; flex: 0 0 24px; }
+.live-tyre-age { font-size: 10px; color: #c6cad3; }
+.live-tyre-missing { color: #7d8492; display: inline-block; width: 24px; text-align: center; }
+@media (max-height: 800px) { .live-tyre-icon { width: 20px; height: 20px; flex-basis: 20px; } }

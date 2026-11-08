@@ -1,5 +1,5 @@
 import useRaceFeed from "./race/useRaceFeed";
-import {controllerView} from "./race/controllerView";
+import {controllerView,viewAccess} from "./race/controllerView";
 
 import LiveRace from "./LiveRace";
 import { useEffect, useState } from "react";
@@ -159,7 +159,7 @@ function getCountdown(milliseconds) {
 
 function App() {
   const feed=useRaceFeed();
-  const [wall]=useState(()=>window.location.pathname==='/wall'||new URLSearchParams(window.location.search).get('wall')==='1');
+  const [{wall,developer}]=useState(()=>viewAccess(window.location.pathname,window.location.search));
   const [manualView,setView]=useState('dashboard');
   const controller=feed.race.controller;
   const view=controllerView(controller,manualView);
@@ -284,13 +284,13 @@ function App() {
           <h1>RACE CENTER</h1>
         </div>
 
-        {!wall && <div>
+        {developer && <div>
           <button disabled={feed.connection!=='connected'} onClick={()=>feed.send({action:'controller-mode',mode:'AUTO'})} aria-pressed={controller?.mode==='AUTO'}>AUTO</button>
           <button disabled={feed.connection!=='connected'} onClick={()=>{setView('live');feed.send({action:'controller-mode',mode:'MANUAL'});}} aria-pressed={controller?.mode==='MANUAL'}>MANUAL</button>
           {feed.controlError&&<span role="alert">{feed.controlError}</span>}
           <details><summary>Session controller diagnostics</summary><pre style={{maxHeight:220,overflow:'auto',fontSize:11}}>{JSON.stringify(controller??{state:'Waiting for controller-enabled backend'},null,2)}</pre></details>
         </div>}
-        <small role="status">{controller?.mode??'Backend offline'} · {controller?.state??'Waiting'} · {feed.connection} · {feed.race.upstream}</small>
+        <small role="status">{developer ? `${controller?.mode??'Backend offline'} · ${controller?.state??'Waiting'} · ${feed.connection} · ${feed.race.upstream}` : (feed.connection!=='connected' ? 'Connecting to race updates…' : controller?.view==='live' ? 'Session coverage' : 'Waiting for the next session')}</small>
         {!wall && <nav className="navigation">
           <button
             className={view === "dashboard" ? "active" : ""}
@@ -538,7 +538,7 @@ function App() {
           </section>
         </main>
       ) : (
-        <LiveRace feed={feed} wall={wall} />
+        <LiveRace feed={feed} wall={wall} developer={developer} />
       )}
     </div>
   );

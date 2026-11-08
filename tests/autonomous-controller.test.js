@@ -17,7 +17,7 @@ test('controller state survives topic deltas and arrives on refresh snapshots',(
 });
 test('read-only circuit view does not render developer controls',async()=>{
  const {createServer}=await import('vite');const {createElement}=await import('react');const {renderToStaticMarkup}=await import('react-dom/server');
- const server=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom'});
+ const server=await createServer({server:{middlewareMode:true,hmr:false,watch:null},appType:'custom'});
  try{
   const {default:Race}=await server.ssrLoadModule('/src/LiveRace.jsx');
   // Shared feed: SSR must not create/use a standalone WebSocket hook.

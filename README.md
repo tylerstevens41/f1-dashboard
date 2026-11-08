@@ -4,6 +4,7 @@ Existing React/Vite dashboard with a backend-only LiveF1 bridge.
 
 - [LIVE/TEST setup, Windows commands, protocol, verification limits and migration inventory](docs/livef1-milestone-1.md)
 - [Reusable circuit architecture](docs/circuit-system.md)
+- [Automatic circuit preparation, Mexico validation and season batch commands](docs/automatic-circuit-preparation.md)
 
 ```sh
 npm ci

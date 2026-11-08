@@ -256,3 +256,155 @@ npm run dev
 ```
 
 Reload the dashboard with your existing `austin-calibration.json`, `austin-corners.json` and `austin-sectors.json`. Leave **Preview calculated boundaries only** OFF: the normal display should match the preview you already tested. In the editor, choose S1 and select Saved manual override; only S1 should move. Refresh to confirm the explicit choice remains. Choose Calculated (or Use calculated position), then refresh again: S1 should stay calculated and the old manual fraction should remain available. Repeat for start/finish and S2 if desired. FIA warnings and provisional status must remain visible. No session download, corner re-import, recalibration, file replacement or deletion is required.
+
+### PR #6: bounded FastF1 lap-loading probe
+
+FastF1 3.9.0 authenticates live-timing HTTP requests independently of LiveF1.
+The background importer now refuses interactive login, retains existing valid
+FastF1 tokens and cached responses, and never copies LiveF1 credentials.
+Authenticate interactively in the dedicated environment if the report says
+`fastf1-authentication-required`. Never share authentication output or tokens.
+
+```powershell
+git switch feat/automatic-circuit-preparation
+git pull --ff-only origin feat/automatic-circuit-preparation
+.\.venv-fastf1\Scripts\python.exe -m fastf1 auth f1tv --authenticate
+.\.venv-fastf1\Scripts\python.exe -m bridge.fastf1_probe --year 2026 --event Mexico --session Race --seconds 45 --report .\fastf1-probe.json
+Get-Content .\fastf1-probe.json -Raw
+.\.venv\Scripts\python.exe -m bridge.preparation --year 2026 --event Mexico --session Race --annotations-only --login
+Get-Content .\circuit-assets\circuit-65-2026\annotation-worker-progress.json -Raw
+Get-Content .\circuit-assets\circuit-65-2026\annotation-diagnostics.json -Raw
+```
+
+The probe has a hard 45-second process deadline. HTTP calls have 10-second
+connect and 30-second read-inactivity limits; these are not whole-download
+limits. The existing 600-second worker deadline remains unchanged. Progress
+records exact known API loading/parsing stages and sanitized request category,
+start/completion/failure, elapsed seconds, status and cache hit. No URL, query,
+header, response body or raw exception text is exported. HTTP 401/403 indicates
+access rejection; timeouts/connection errors indicate transport failure; parsing
+stages after completed requests distinguish local processing. A hard probe
+timeout retains its last stage/request for diagnosis. A successful probe only
+confirms lap loading, not annotation accuracy or upstream position availability.
+
+`Session.get_circuit_info()` in the pinned version accesses both `session_info`
+and `laps`; the lower-level MultiViewer function is marked private. We do not
+fabricate a lap table, switch sessions or depend on that private metadata API.
+Metadata is checkpointed immediately after the supported public method succeeds;
+registration still requires real reference-lap positions. Existing completed
+corners/sectors and geometry remain intact on failure. Austin registration,
+sector calculation and all rendering settings are unchanged.
+
+The narrow token-manager hook is specific to pinned FastF1 3.9.0 and restored
+on exit. Requests still use FastF1's own authenticated adapters, cache and rate
+limits. No retries or alternative sessions are added. Actual Windows blocking
+operation remains unconfirmed until the probe is run locally.
+
+Validation in this checkout: the short real network probe resolved the session
+and received schedule/results responses, but the first SessionInfo request hit
+`fastf1-authentication-required` before network transmission. It exited with a
+safe report in approximately 11 seconds. No real Mexico lap or GPS data loaded,
+so upstream telemetry availability and the user's specific Windows stall remain
+unconfirmed. Run the same probe after local FastF1 authentication to establish
+the next operation. Do not share credentials or raw library logs.
+
+### Parsed positions followed by DataNotLoadedError
+
+Download/parse log messages do not prove that `Session.pos_data` was initialized.
+FastF1's telemetry loader catches failures during subsequent clock calculation
+and per-driver Telemetry construction. The importer now checks public position
+and clock properties immediately after loading, captures the original telemetry
+loader exception without exporting its text, and records safe FastF1 function/
+line information. It attempts one complete public `Session.load(laps=True,
+telemetry=True, weather=False, messages=False)` using existing caches to recover
+partial session state. If this also fails, no missing properties are fabricated
+and the original safe error is retained at `telemetry-readiness`.
+
+A usable fastest lap remains the reference. If that lap lacks accessible finite,
+moving position samples, the importer tries other accurate quick non-pit laps
+through public lap selectors, preserving driver/session binding and all existing
+registration and sector mathematics. No alternate session is selected. Reports
+show `positionDrivers`, `usablePositionDrivers`, and reference-lap rejection
+counts. Existing annotation checkpoints and geometry remain untouched on failure.
+
+Use the annotation-only retry and report commands above. If it still fails,
+inspect `error.exceptionType`, `error.upstreamLocation` and the
+`telemetry-readiness` / `telemetry-full-reload` events. The original Windows
+exception inside FastF1 is not established by the earlier DataNotLoadedError
+alone; real Mexico telemetry and annotation completion require local validation.
+
+### Windows checkpoint file-lock recovery
+
+The user's real Mexico run at `5102428` loaded usable positions for 22 drivers,
+registered 17 corners and accepted 40 of 76 inspected laps for sector calculation.
+It reached `complete: true` in 13.485 seconds, with a PermissionError at the atomic
+replace operation during sectors-checkpoint. This establishes successful source
+access/calculation locally, but not visual/physical annotation accuracy. The
+report does not identify the destination or the process holding it.
+
+Atomic annotation/progress/result writes now retry only Windows errors 5, 32 or
+33, at most six attempts with 0.5 seconds total backoff. Each attempt preserves
+the old destination and the complete temporary file; there is no delete-first
+fallback or non-atomic write. Persistent failure remains an error, now with a
+safe `windowsErrorCode` and file-permission/locking guidance. Other permission
+errors fail immediately. No geometry or annotation mathematics changed.
+
+Pull and rerun the same `--annotations-only` command above to reuse checkpoints.
+Completed corners/sectors should bypass source fetching; inspect final warnings
+and the display before considering annotations visually validated. No cache or
+geometry deletion is necessary.
+
+### Automatic corner-label collision avoidance (PR #6)
+
+The shared renderer now runs a pure, memoized render-only layout pass for every
+circuit. It starts from the existing manual/imported offset times the unchanged
+1.15 spacing multiplier; circles/text retain the existing 1.65 scale. Numeric
+turn number, then suffix, defines a stable priority independent of input order.
+Lower turns keep clear preferred placements, so Turn 17 moves before Turn 15.
+
+Collision envelopes include circle stroke and a configurable safety margin.
+The first correction reflects the preferred vector across the local track
+tangent at the exact stored corner fraction: its normal component reverses,
+its tangential component and length remain unchanged. Every candidate checks
+all other label positions, the entire rendered track polyline and approximate
+fixed start/finish, timing-boundary and speed-trap envelopes. If reflection is
+blocked, 24 deterministic normal/distance/tangential alternatives are considered,
+up to 1.75 times the initial offset distance. No iterative settling, randomness,
+driver-dependent inputs or exported-coordinate changes are involved.
+
+If no clear candidate exists, a deterministic score prioritizes already placed
+lower turns, then total conflicts, penetration and movement. A final pass exposes
+unresolved turn numbers as a development-only yellow SVG warning. This is a
+bounded greedy layout, not a guarantee that every dense stadium can be packed.
+Fixed text/marker envelopes are conservative approximations; pit-lane/DRS effects
+are not separate obstacles. Manual editor/export data remains the original
+preferred placement. The existing selected anchor indicator stays at the real
+corner, even if the rendered circle is automatically displaced.
+
+Track appearance adds **Corner collision margin** in native SVG units (default
+35). This preference uses the existing appearance persistence. Native geometry,
+labels and margin scale uniformly with the responsive SVG, so browser resizing
+does not change overlap relationships or cause a viewBox feedback loop. Geometry,
+annotations, visibility, size, spacing and track-width changes recompute layout;
+driver updates do not. The viewport expands to include resolved labels.
+
+Local review after pulling the branch:
+
+```powershell
+git switch feat/automatic-circuit-preparation
+git pull --ff-only origin feat/automatic-circuit-preparation
+# In your backend terminal:
+.\.venv\Scripts\python.exe -m bridge.server --idle --allow-test --allow-prepare --login
+# In a separate terminal:
+npm run dev
+```
+
+Select your existing Mexico Race TEST clip and prepared circuit. No preparation,
+FastF1 import, cache deletion or geometry regeneration is required. Inspect Turns
+15/17 in the stadium, then change corner size, spacing and collision margin in
+Track appearance. Confirm all 17 labels stay readable, drivers remain unchanged,
+and no yellow unresolved-collision warning appears. Repeat with Austin's existing
+calibration and all 20 turns. Change a manual offset in the editor and confirm
+preview updates immediately; export retains the manual offset, not the automatic
+resolved circle position. Check narrow and full-screen windows. Real Mexico/Austin
+visual success still requires the user's local assets; no screenshot is claimed.

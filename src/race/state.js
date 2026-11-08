@@ -11,6 +11,7 @@ export function raceReducer(state, message) {
   next = { ...next, generation: message.generation, sequence: message.sequence, mode: message.mode,
     sessionId: message.sessionId, upstream: message.upstream, playback: message.playback,
     speed: message.speed, clockMs: message.type === 'topic' ? next.clockMs : message.clockMs, clockBasis: message.clockBasis,
+    liveDiagnostics:message.liveDiagnostics??next.liveDiagnostics,
     playbackInfo: message.playbackInfo ?? next.playbackInfo, error: message.error ?? null };
   if (message.type === 'snapshot') return { ...next, topics: message.topics ?? {}, freshness: message.freshness ?? {}, capabilities: message.capabilities ?? {} };
   if (message.type === 'topic' && typeof message.topic === 'string' && message.data && typeof message.data === 'object') {

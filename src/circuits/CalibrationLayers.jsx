@@ -12,7 +12,7 @@ function scatter(points,project,color){
 export default function CalibrationLayers({ calibration, geometry, circuit, layers }) {
   if(!layers)return null;
   const native=geometry.projectNative ?? geometry.project;
-  const aligned=calibration?.svgComparison?.similarity.points;
+  const aligned=calibration?.svgComparison?.similarity?.points;
   const path=aligned?.map((p,i)=>{const point=native(p[0],p[1]);return `${i?'L':'M'} ${point.x} ${point.y}`;}).join(' ');
   return <g pointerEvents="none" aria-label="Calibration comparison layers">
     {layers.original && <image href={circuit.decorativeSvg} x="0" y="0" width={geometry.width} height={geometry.height} opacity="0.3" preserveAspectRatio="xMidYMid meet"/>}

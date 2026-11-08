@@ -1,3 +1,6 @@
+import LiveControls from "./race/LiveControls";
+import PreparationPanel from './circuits/PreparationPanel';
+import {sessionCircuitKey,sessionYear,preparedForSession,preparedCircuit} from './circuits/prepared';
 import useRaceFeed from "./race/useRaceFeed";
 import RaceDevTools from "./race/RaceDevTools";
 import { flattenRecord, selectCircuit, tyrePresentation } from "./race/state";
@@ -421,7 +424,10 @@ export default function LiveSession() {
   const sessionType = getSessionType(session);
 
   // Never silently display Austin for another event.
-  const circuitName = selectCircuit(session);
+  const prepared=preparedForSession(feed.preparedBundles,session);
+  const dynamicCircuit=useMemo(()=>prepared?preparedCircuit(prepared):null,[prepared]);
+  const circuitName = selectCircuit(session)??dynamicCircuit?.name;
+  const activeCircuitJob=Object.values(feed.circuitJobs).find(job=>job.identity?.circuitKey===sessionCircuitKey(session)&&job.identity?.year===sessionYear(session));
 
   const towerHeaderHeight = 36;
   const columnHeaderHeight = 26;
@@ -439,6 +445,7 @@ export default function LiveSession() {
         minHeight: 0,
       }}
     >
+      <LiveControls feed={feed}/>
       {import.meta.env.DEV && <RaceDevTools feed={feed} circuit={circuitName} />}
       <div style={{ padding: "0 16px", color: race.mode === "TEST" ? "#ffd43b" : "#40d98a" }}>{race.mode === "TEST" ? "TEST · historical LiveF1 data" : "LIVE"} · {race.upstream}{race.mode === 'TEST' && ` · ${race.playback} · ${playbackClock(race.playbackInfo?.offsetMs)} / ${playbackClock(race.playbackInfo?.durationMs)}`}</div>
       {/* SESSION HEADER */}
@@ -776,10 +783,13 @@ export default function LiveSession() {
             animation={feed.animation}
             mode={race.mode}
             circuitName={circuitName}
+            prepared={selectCircuit(session)?null:prepared}
+            circuitOverride={selectCircuit(session)?null:dynamicCircuit}
+            clockMs={feed.clockMs}
             drivers={gpsDrivers}
             selectedDriver={selectedDriver}
             onSelectDriver={setSelectedDriver}
-          /> : <p>No verified circuit mapping for this session. Timing remains available.</p>}
+          /> : <><p>No prepared circuit for this session. Timing remains available.</p>{import.meta.env.DEV && <PreparationPanel job={activeCircuitJob} disabled={!activeCircuitJob?.identity} onPrepare={()=>feed.send({action:'circuit-prepare',year:sessionYear(session),path:activeCircuitJob?.identity?.path})}/>}</>}
         </section>
       </div>
 

@@ -34,6 +34,7 @@ export class AnimationEngine {
     this.deliveryIntervals = [];
     this.deliveryAges = [];
     this.underruns = 0;
+    this.ingestAt=null;this.lastAcceptedAt=null;this.lastRenderedAt=null;this.lastMarkerRenderAt=null;
     this.lastFrame = new Map();
     this.targetDelay = 0;
     this.phaseError = 0;
@@ -100,6 +101,7 @@ export class AnimationEngine {
     if (message.type !== 'topic') this.sync(message,now);
     const positions = message.type === 'snapshot' ? message.topics?.['Position.z'] : message.topic === 'Position.z' ? message.data : null;
     if (!positions) return;
+    this.ingestAt=now;
     let newest = null;
     for (const [number,record] of Object.entries(positions)) {
       if (!record || typeof record !== 'object') { this.add(number,{}); continue; }
@@ -127,8 +129,8 @@ export class AnimationEngine {
   add(number, point) {
     number = String(number);
     let driver = this.drivers.get(number);
-    if (!driver) { driver = {samples:[],rejected:0,duplicates:0,intervals:[],state:'waiting',underruns:0,rejectedTimes:new Set()}; this.drivers.set(number,driver); }
-    if (![point?.x,point?.y,point?.time].every(Number.isFinite)) { this.reject(driver,point); return; }
+    if (!driver) { driver = {samples:[],rejected:0,duplicates:0,intervals:[],state:'waiting',underruns:0,rejectedTimes:new Set(),rejectionReasons:{}}; this.drivers.set(number,driver); }
+    if (![point?.x,point?.y,point?.time].every(Number.isFinite)) { this.reject(driver,point,'non-finite'); return; }
     if (driver.rejectedTimes.has(point.time)) return;
     const samples = driver.samples;
     const index = samples.findIndex(p=>p.time>=point.time);
@@ -136,16 +138,17 @@ export class AnimationEngine {
     const previous = index === 0 ? null : index < 0 ? samples.at(-1) : samples[index-1];
     const next = index < 0 ? null : samples[index];
     const gap = previous ? point.time-previous.time : 0;
-    if (previous && gap <= this.options.maxGapMs && Math.hypot(point.x-previous.x,point.y-previous.y)/gap>this.options.maxUnitsPerMs) { this.reject(driver,point); return; }
-    if (next && next.time-point.time <= this.options.maxGapMs && Math.hypot(next.x-point.x,next.y-point.y)/(next.time-point.time)>this.options.maxUnitsPerMs) { this.reject(driver,point); return; }
+    if (previous && gap <= this.options.maxGapMs && Math.hypot(point.x-previous.x,point.y-previous.y)/gap>this.options.maxUnitsPerMs) { this.reject(driver,point,'speed-spike'); return; }
+    if (next && next.time-point.time <= this.options.maxGapMs && Math.hypot(next.x-point.x,next.y-point.y)/(next.time-point.time)>this.options.maxUnitsPerMs) { this.reject(driver,point,'speed-spike'); return; }
+    this.lastAcceptedAt=this.ingestAt??null;driver.lastAcceptedAt=this.lastAcceptedAt;
     const copy = {x:point.x,y:point.y,time:point.time};
     if (index < 0) samples.push(copy); else samples.splice(index,0,copy);
     if (gap > 0 && gap <= 10000) driver.intervals = [...driver.intervals,gap].slice(-80);
     // A larger bounded store protects against packet batching and fast TEST playback.
     while (samples.length > 512 || (samples.length>2 && samples.at(-1).time-samples[0].time>30000)) samples.shift();
   }
-  reject(driver,point) {
-    if(!Number.isFinite(point?.time) || !driver.rejectedTimes.has(point.time))driver.rejected++;
+  reject(driver,point,reason='invalid') {
+    if(!Number.isFinite(point?.time) || !driver.rejectedTimes.has(point.time)){driver.rejected++;driver.rejectionReasons[reason]=(driver.rejectionReasons[reason]??0)+1;}
     if(Number.isFinite(point?.time))driver.rejectedTimes.add(point.time);
     while(driver.rejectedTimes.size>512)driver.rejectedTimes.delete(driver.rejectedTimes.values().next().value);
   }
@@ -172,7 +175,11 @@ export class AnimationEngine {
   evaluate(driver, time, source) {
     const samples = driver.samples;
     if (!samples.length || time === null) return {state:'waiting',point:null};
-    if (source-samples.at(-1).time>this.options.staleMs) return {state:'stale',point:null};
+    // A delayed LIVE cursor can still be bracketed by measured samples even
+    // when source UTC age exceeds staleMs. Credit only actual presentation
+    // delay, capped by the existing maximum buffer; never extend TEST lifetime.
+    const presentationCredit=this.mode==='LIVE'?Math.min(this.options.maxBufferMs,Math.max(0,source-time)):0;
+    if (source-samples.at(-1).time>this.options.staleMs+presentationCredit) return {state:'stale',point:null};
     let low=0,high=samples.length;
     while(low<high){const mid=(low+high)>>1;if(samples[mid].time<=time)low=mid+1;else high=mid;}
     const a=samples[low-1],b=samples[low];
@@ -231,6 +238,7 @@ export class AnimationEngine {
       if(output.underrun){if(driver.waitingSince===undefined)driver.waitingSince=now;}
       else delete driver.waitingSince;
       if(output.point && output.state==='interpolating') driver.hasDisplayed=true;
+      if(output.point)this.lastRenderedAt=now;
       driver.state=output.state;result.set(number,output);
       this.listeners.get(number)?.(output);
     }
@@ -291,8 +299,9 @@ export class AnimationEngine {
     id=request(draw);
     return()=>cancel(id);
   }
+  markerRendered(number,now){this.lastMarkerRenderAt=now;const driver=this.drivers.get(String(number));if(driver)driver.lastMarkerRenderAt=now;}
   diagnostics(now) {
-    return {mode:this.mode,running:this.running,speed:this.speed,sourceTime:this.sourceTime(now),interpolationTime:this.cursor,
+    return {lastMarkerRenderAgeMs:this.lastMarkerRenderAt===null?null:now-this.lastMarkerRenderAt,lastAcceptedAgeMs:this.lastAcceptedAt===null?null:now-this.lastAcceptedAt,lastRenderedAgeMs:this.lastRenderedAt===null?null:now-this.lastRenderedAt,mode:this.mode,running:this.running,speed:this.speed,sourceTime:this.sourceTime(now),interpolationTime:this.cursor,
       phase:this.cursor===null?'priming':'active',resetReason:this.resetReason,rebufferReason:this.rebufferReason,
       lastGpsArrivalMs:this.arrival ? Math.max(0,now-this.arrival.wall) : null,
       bufferMs:this.targetDelay,effectiveDelayMs:this.cursor===null?null:this.sourceTime(now)-this.cursor,
@@ -300,7 +309,7 @@ export class AnimationEngine {
       serverRate:this.serverRate,phaseErrorMs:this.phaseError,correctionPpm:this.correction*1e6,rebuffers:this.rebuffers,
       trace:this.trace.slice(-600),automatic:this.manualBufferMs===null,underruns:this.underruns,
       deliveryAgeMs:percentile(this.deliveryAges,0.95),deliveryHz:this.deliveryIntervals.length ? 1000/percentile(this.deliveryIntervals,0.5) : null,
-      drivers:[...this.drivers].map(([number,d])=>({number,state:d.state,buffered:d.samples.length,rejected:d.rejected+(d.sourceRejected??0),
+      drivers:[...this.drivers].map(([number,d])=>({number,rejectionReasons:d.rejectionReasons,sourceSampleAgeMs:this.sourceTime(now)-d.samples.at(-1)?.time,presentationSampleAgeMs:this.cursor===null?null:this.cursor-d.samples.at(-1)?.time,state:d.state,buffered:d.samples.length,rejected:d.rejected+(d.sourceRejected??0),
         frequencyHz:d.intervals.length ? 1000/percentile(d.intervals,0.5):null,underruns:d.underruns}))};
   }
 }

@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import { layoutCornerLabels } from "./cornerLayout.js";
 import BufferedDriverMarker from "./BufferedDriverMarker";
 import { pointAt, pathRange } from "./geometry";
 import { bases, defaultAppearance, palette, sectorRanges, cornerKey } from "./annotations";
@@ -7,12 +9,11 @@ function Segment({ geometry, start, end, color, width = 200 }) {
   return ranges.map(([a,b], i) => <path key={i} d={geometry.path} pathLength="1" fill="none" stroke={color} strokeWidth={width} strokeDasharray={`${b-a} ${1-(b-a)}`} strokeDashoffset={-a} />);
 }
 
-export default function CircuitRenderer({ geometry, circuit, drivers = [], selectedDriver, onSelectDriver,
+function CircuitDrawing({ geometry, circuit, drivers = [], selectedDriver, onSelectDriver,
   showLabels = true, showReference = false, animate = false, flag, annotations = circuit.annotations,
   annotationsCalibrated = true, svgRef, onClick, children, style, variant = "live", animation, showTrack = true,
   appearance = defaultAppearance, previewProvisional = false, annotationSelection = null, editingAnnotations = false }) {
-  if (!geometry) return null;
-  const features = annotationsCalibrated ? annotations : {};
+  const features = useMemo(()=>annotationsCalibrated ? annotations : {},[annotationsCalibrated,annotations]);
   const modern=features?.schema==='f1-circuit-annotations-v1';
   const verified=modern && [features.startFinish,features.sector1End,features.sector2End].every(x=>x?.status==='verified');
   const calculated=modern && [features.startFinish,features.sector1End,features.sector2End].every(x=>x?.calculated||x?.explicitManualSelection||x?.status==='verified');
@@ -21,16 +22,26 @@ export default function CircuitRenderer({ geometry, circuit, drivers = [], selec
   const scale=Math.max(1,Math.min(2,Number(appearance.cornerLabelScale)||defaultAppearance.cornerLabelScale));
   const radius=155*scale;
   const spacing=Math.max(0.8,Math.min(1.5,Number(appearance.cornerLabelSpacing)||defaultAppearance.cornerLabelSpacing));
-  const cornerLabels=appearance.corners ? (features.corners??[]).filter(f=>!f.hidden && (showFeature(f)||f.imported)).map(f=>{
-    const p=pointAt(geometry,f.at);
-    return {feature:f,x:p.x+(f.offset?.x??0)*spacing,y:p.y+(f.offset?.y??-450)*spacing};
-  }) : [];
+  const cornerLayout=useMemo(()=>{
+    const visible=f=>f && (!modern || f.status==='verified' || f.calculated || f.explicitManualSelection || previewProvisional);
+    const labels=appearance.corners ? (features.corners??[]).filter(f=>!f.hidden && (visible(f)||f.imported)).map(f=>{
+      const p=pointAt(geometry,f.at);
+      return {feature:f,x:p.x+(f.offset?.x??0)*spacing,y:p.y+(f.offset?.y??-450)*spacing,radius:radius+17.5*scale};
+    }) : [];
+    const obstacles=[];
+    if(appearance.startFinish && visible(features.startFinish))obstacles.push({...pointAt(geometry,features.startFinish.at),radius:230});
+    if(appearance.boundaries)for(const f of [features.sector1End,features.sector2End])if(visible(f))obstacles.push({...pointAt(geometry,f.at),radius:250});
+    if(appearance.speedTraps)for(const f of features.speedTraps??[])if(visible(f)){const p=pointAt(geometry,f.at);obstacles.push({x:p.x,y:p.y-220,radius:300});}
+    return layoutCornerLabels({labels,geometry,obstacles,trackWidth:appearance.trackWidth,padding:appearance.cornerCollisionPadding??35});
+  },[geometry,features,modern,previewProvisional,appearance.corners,appearance.startFinish,appearance.boundaries,appearance.speedTraps,appearance.trackWidth,appearance.cornerCollisionPadding,spacing,radius,scale]);
+  const cornerLabels=cornerLayout.labels;
   // Expand only the viewport when needed; anchors, offsets and GPS are unchanged.
   const inset=radius+35*scale/2+20;
   const left=Math.min(0,...cornerLabels.map(p=>p.x-inset)),top=Math.min(0,...cornerLabels.map(p=>p.y-inset));
   const right=Math.max(geometry.width,...cornerLabels.map(p=>p.x+inset)),bottom=Math.max(geometry.height,...cornerLabels.map(p=>p.y+inset));
   return <svg ref={svgRef} viewBox={`${left} ${top} ${right-left} ${bottom-top}`} preserveAspectRatio="xMidYMid meet"
     style={style ?? { width: "100%", height: "100%", display: "block", overflow: "visible" }} role="img" aria-label={`${circuit.name} circuit`} onClick={editingAnnotations?undefined:onClick} onClickCapture={editingAnnotations?onClick:undefined}>
+    {import.meta.env.DEV && cornerLayout.warnings.length>0 && <g data-layer="corner-layout-warning"><title>{`Unresolved corner label placement: ${cornerLayout.warnings.map(w=>w.corner).join(', ')}. Adjust manual offsets or label spacing.`}</title><text x={left+40} y={top+180} fontSize="140" fill="#ffd43b">Corner label collisions: {cornerLayout.warnings.map(w=>w.corner).join(', ')}</text></g>}
     {showTrack && <g data-layer="track">
       {flag && circuit.flagColors[flag] && <path data-layer="race-control" d={geometry.path} fill="none" stroke={circuit.flagColors[flag]} strokeWidth={appearance.trackWidth+100} strokeLinecap="round" strokeLinejoin="round"/>}
       {appearance.drs && (features.zones??[]).filter(showFeature).map(zone=><Segment key={zone.id} geometry={geometry} {...zone} color="#1dd58a" width={appearance.trackWidth+140}/>)}
@@ -44,7 +55,7 @@ export default function CircuitRenderer({ geometry, circuit, drivers = [], selec
     {cornerLabels.map(({feature:f,x,y},i)=>{
       const selected=annotationSelection?.kind==='corner' && cornerKey(annotationSelection)===cornerKey(f);
       const label=modern?cornerKey(f):`T${cornerKey(f)}`;
-      return <g data-layer="corner" data-corner={cornerKey(f)} key={i} pointerEvents="none">
+      return <g data-layer="corner" data-corner={cornerKey(f)} data-placement={cornerLabels[i].strategy} key={cornerKey(f)} pointerEvents="none">
         <circle cx={x} cy={y} r={radius} fill="#151a23" stroke={selected?'#ffd43b':'#e4e8ef'} strokeWidth={(selected?35:18)*scale}/>
         <text x={x} y={y} textAnchor="middle" dominantBaseline="central" fontSize={145*scale*Math.min(1,3/label.length)} fill="white">{label}</text>
       </g>;
@@ -70,4 +81,8 @@ export default function CircuitRenderer({ geometry, circuit, drivers = [], selec
       </g>;
     })}
   </svg>;
+}
+
+export default function CircuitRenderer(props){
+  return props.geometry ? <CircuitDrawing {...props}/> : null;
 }

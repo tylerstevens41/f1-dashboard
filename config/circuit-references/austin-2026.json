@@ -8,6 +8,7 @@
   "lengthMetres": 5513,
   "sectorLengthsMetres": [1658, 1941, 1914],
   "intermediates": [{"key": "sector1End", "beforeTurn": 7, "distanceMetres": 65}, {"key": "sector2End", "beforeTurn": 13, "distanceMetres": 65}],
+  "finishReferenceTurns": {"beforeTurn": 20, "afterTurn": 1},
   "timingLineCoordinates": null,
   "note": "Read the visual rows, not PDF extraction order: S1=1.658, S2=1.941, S3=1.914 km. The map gives no registered LiveF1 timing-line coordinates. Corner offsets and geometry-length ratios are coarse checks, not independent geospatial verification."
 }

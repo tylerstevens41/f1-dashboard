@@ -101,6 +101,9 @@ class SectorImporterTests(unittest.TestCase):
                           'Date':origin+pd.to_timedelta(p[:,0],unit='s'),'X':p[:,1],'Y':p[:,2],'Source':'pos','Status':'OnTrack'})
         session=SimpleNamespace(laps=pd.DataFrame([row]),pos_data={'1':pos},t0_date=origin)
         data=collect_laps(session);self.assertEqual(len(data['laps']),1)
+        progress=[]
+        self.assertEqual(collect_laps(session,progress=lambda **v:progress.append(v)),data)
+        self.assertEqual(progress[-1]['accepted'],1)
         remote=pos[(pos.SessionTime.dt.total_seconds()<lap['start']+40)|(pos.SessionTime.dt.total_seconds()>lap['start']+43)]
         session.pos_data={'1':remote}
         kept=collect_laps(session);self.assertEqual(len(kept['laps']),1);self.assertEqual(kept['laps'][0]['remoteGapCount'],1)

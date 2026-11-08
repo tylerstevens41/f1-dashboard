@@ -64,7 +64,8 @@ class CornerImporterTests(unittest.TestCase):
 
     def test_missing_fastf1_info_is_explicit(self):
         fake=Mock();fake.get_session.return_value.get_circuit_info.return_value=None
-        with tempfile.TemporaryDirectory() as folder,patch.dict('sys.modules',{'fastf1':fake}):
+        from contextlib import nullcontext
+        with tempfile.TemporaryDirectory() as folder,patch.dict('sys.modules',{'fastf1':fake}),patch('bridge.fastf1_network.bounded_network',return_value=nullcontext([])):
             with self.assertRaisesRegex(ValueError,'no circuit'):fetch(2026,'test','R',folder)
 
     def test_geometry_fingerprint_stable(self):

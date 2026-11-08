@@ -12,12 +12,17 @@ class DashboardClient(RealF1Client):
 
     async def _stream(self, force_login):
         await self.status('connecting')
+        failed=False
         try:
             async for marker in super()._stream(force_login):
                 await self.status('connected')
                 yield marker
+        except Exception as exc:
+            failed=True
+            await self.status('authentication-error' if type(exc).__name__=='AuthenticationError' else 'connection-error')
+            raise
         finally:
-            await self.status('disconnected')
+            if not failed:await self.status('disconnected')
 
     async def _dispatch(self, frame):
         # RealF1Client's standard handler cannot parse TimingAppData (None in

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from websockets.asyncio.server import serve
 from .archive import fetch_clip, list_sessions, load_recording, save_clip
-from .protocol import TOPICS, RaceState
+from .protocol import TOPICS, RaceState, merge
 from .playback_clock import PlaybackClock
 
 
@@ -21,6 +21,8 @@ class Bridge:
         self.control_lock = asyncio.Lock()
         self.allow_test = allow_test
         self.error = None
+        self.live_expected = None
+        self.live_confirmed = True
         self.recording_path = recording
         self.recording = None
         self.record_started = None
@@ -151,6 +153,18 @@ class Bridge:
     async def emit(self, topic, payload, timestamp=None, clock_ms=None):
         if topic not in TOPICS:
             return
+        if self.state.mode=='LIVE' and self.live_expected:
+            if topic=='SessionInfo':
+                expected=self.live_expected
+                info=merge(self.state.topics.get('SessionInfo',{}),payload) if isinstance(payload,dict) else {}
+                actual=info.get('Path')
+                if actual is not None or (info.get('StartDate')):
+                    self.live_confirmed=(actual==expected['path']) if actual is not None else (
+                        str(info.get('Meeting',{}).get('Circuit',{}).get('Key'))==str(expected['circuit']['Key']) and
+                        info.get('Name')==expected['session'] and str(info['StartDate'])[:10]==str(expected['start'])[:10])
+                    self.error=None if self.live_confirmed else 'The current LIVE feed is not the selected session. Waiting; no archive substitution.'
+                    await self.status('connected' if self.live_confirmed else 'waiting-session')
+            elif not self.live_confirmed:return
         if self.recording_path and self.state.mode == 'LIVE':
             self.capture(topic, payload)
         try:
@@ -193,16 +207,19 @@ class Bridge:
                 pass
             self.source_task = None
 
-    async def start_live(self):
+    async def start_live(self, expected=None):
         await self.stop_source()
         self.clip = None
         self.timeline = None
+        self.live_expected=expected
+        self.live_confirmed=expected is None
         self.state.reset('LIVE')
         self.error = None
         await self.broadcast(self.snapshot())
         self.source_task = asyncio.create_task(self.run_live())
 
     async def begin_live_snapshot(self):
+        self.live_confirmed=self.live_expected is None
         self.state.reset('LIVE')
         self.state.upstream = 'connected'
         await self.broadcast(self.snapshot())
@@ -214,9 +231,9 @@ class Bridge:
             await client._run()  # pinned LiveF1 1.3.0 transport; see docs
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             self.error = 'LiveF1 connection failed. Verify backend login locally; no credentials are sent to the browser.'
-            await self.status('error')
+            await self.status('authentication-error' if type(exc).__name__=='AuthenticationError' else 'connection-error')
 
     async def start_clip(self, clip):
         await self.stop_source()
@@ -267,6 +284,41 @@ class Bridge:
     async def command(self, client, command):
         if command.get('action') in ('circuit-lookup','circuit-prepare'):
             await self.circuit_command(client, command)
+            return
+        if command.get('action') in ('live','live-stop','live-sessions'):
+            async with self.control_lock:
+                try:
+                    action=command['action']
+                    if action=='live-sessions':
+                        year=datetime.now(timezone.utc).year
+                        sessions=await asyncio.to_thread(list_sessions,year)
+                        today=datetime.now(timezone.utc).date()
+                        candidates=[]
+                        for session in sessions:
+                            if session.get('session')!='Race':continue
+                            try:date=datetime.fromisoformat(session['start'].replace('Z','+00:00')).date()
+                            except (ValueError,TypeError,KeyError):continue
+                            if abs((date-today).days)<=1:candidates.append(session)
+                        await self.send(client,{'version':1,'type':'live-sessions','sessions':candidates})
+                    elif action=='live-stop':
+                        if self.state.mode!='LIVE':raise ValueError('LIVE not active')
+                        await self.stop_source();self.state.reset('LIVE');self.error=None
+                        self.live_expected=None;self.live_confirmed=True
+                        self.clip=None;self.timeline=None
+                        self.state.upstream='disconnected';await self.broadcast(self.snapshot())
+                    else:
+                        expected=None
+                        if command.get('path'):
+                            year=datetime.now(timezone.utc).year
+                            sessions=await asyncio.to_thread(list_sessions,year)
+                            matches=[s for s in sessions if s['path']==command['path'] and s.get('session')=='Race']
+                            if len(matches)!=1:raise ValueError('Requested session not published')
+                            expected=matches[0]
+                        await self.start_live(expected)
+                except Exception as exc:
+                    code=getattr(exc,'code',None)
+                    error='LIVE authentication unavailable. Run backend --login locally.' if code=='authentication-required' else 'LIVE control/discovery unavailable. Retry; current feed has not been replaced with archive data.'
+                    await self.send(client,{'version':1,'type':'control-error','error':error})
             return
         if not self.allow_test:
             await self.send(client, {'version':1,'type':'control-error','error':'TEST controls are disabled on this bridge.'})

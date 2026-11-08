@@ -10,6 +10,7 @@ export default function useRaceFeed() {
   const [connection, setConnection] = useState('connecting');
   const [controls, setControls] = useState(false);
   const [sessions, setSessions] = useState([]);
+  const [liveSessions,setLiveSessions]=useState([]);
   const [circuitJobs,setCircuitJobs]=useState({});
   const [preparedBundles,setPreparedBundles]=useState({});
   const [windows, setWindows] = useState([]);
@@ -27,6 +28,7 @@ export default function useRaceFeed() {
           catch{setControlError('Prepared circuit rejected: schema, calibration or annotation geometry mismatch.');}return;
         }
         animation.ingest(message,performance.now());
+        if(message.type==='live-sessions'){setLiveSessions(message.sessions??[]);setControlError('');return;}
         if (message.type === 'windows') setWindows(message.windows ?? []);
         if (message.type === 'controls') setControls(message.enabled === true);
         if (message.type === 'sessions') { setSessions(message.sessions ?? []); setControlError(''); }
@@ -44,7 +46,7 @@ export default function useRaceFeed() {
   useEffect(()=>{
     if(connection==='connected'&&year&&key)transport.current?.send({action:'circuit-lookup',year,path:race.mode==='TEST'?path:undefined});
   },[connection,year,key,path,race.mode]);
-  return { preparedBundles,circuitJobs,animation, race, connection, controls, sessions, windows, controlError,
+  return { preparedBundles,circuitJobs,animation, race, connection, controls, sessions, liveSessions, windows, controlError,
     clockMs: race.mode === 'TEST' ? race.clockMs : now,
     send: command => transport.current?.send(command) };
 }

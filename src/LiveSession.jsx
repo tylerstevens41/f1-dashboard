@@ -1,3 +1,4 @@
+import LiveControls from "./race/LiveControls";
 import PreparationPanel from './circuits/PreparationPanel';
 import {sessionCircuitKey,sessionYear,preparedForSession,preparedCircuit} from './circuits/prepared';
 import useRaceFeed from "./race/useRaceFeed";
@@ -444,6 +445,7 @@ export default function LiveSession() {
         minHeight: 0,
       }}
     >
+      <LiveControls feed={feed}/>
       {import.meta.env.DEV && <RaceDevTools feed={feed} circuit={circuitName} />}
       <div style={{ padding: "0 16px", color: race.mode === "TEST" ? "#ffd43b" : "#40d98a" }}>{race.mode === "TEST" ? "TEST · historical LiveF1 data" : "LIVE"} · {race.upstream}{race.mode === 'TEST' && ` · ${race.playback} · ${playbackClock(race.playbackInfo?.offsetMs)} / ${playbackClock(race.playbackInfo?.durationMs)}`}</div>
       {/* SESSION HEADER */}

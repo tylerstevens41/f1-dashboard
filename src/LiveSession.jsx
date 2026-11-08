@@ -333,8 +333,7 @@ function getSessionType(session) {
 // MAIN COMPONENT
 // ============================================
 
-export default function LiveSession() {
-  const feed = useRaceFeed();
+function SessionContent({feed,wall=false}) {
   const { race, connection } = feed;
   const session = race.topics.SessionInfo ?? EMPTY;
   const driversByNumber = race.topics.DriverList ?? EMPTY;
@@ -445,8 +444,8 @@ export default function LiveSession() {
         minHeight: 0,
       }}
     >
-      <LiveControls feed={feed}/>
-      {import.meta.env.DEV && <RaceDevTools feed={feed} circuit={circuitName} />}
+      {!wall && <LiveControls feed={feed}/>}
+      {!wall && <RaceDevTools feed={feed} circuit={circuitName} />}
       <div style={{ padding: "0 16px", color: race.mode === "TEST" ? "#ffd43b" : "#40d98a" }}>{race.mode === "TEST" ? "TEST · historical LiveF1 data" : "LIVE"} · {race.upstream}{race.mode === 'TEST' && ` · ${race.playback} · ${playbackClock(race.playbackInfo?.offsetMs)} / ${playbackClock(race.playbackInfo?.durationMs)}`}</div>
       {/* SESSION HEADER */}
       <div
@@ -780,6 +779,7 @@ export default function LiveSession() {
         >
           {circuitName ? <LiveCircuitSvg
             key={`${race.generation}-${circuitName}`}
+            readOnly={wall}
             animation={feed.animation}
             mode={race.mode}
             circuitName={circuitName}
@@ -788,8 +788,8 @@ export default function LiveSession() {
             clockMs={feed.clockMs}
             drivers={gpsDrivers}
             selectedDriver={selectedDriver}
-            onSelectDriver={setSelectedDriver}
-          /> : <><p>No prepared circuit for this session. Timing remains available.</p>{import.meta.env.DEV && <PreparationPanel job={activeCircuitJob} disabled={!activeCircuitJob?.identity} onPrepare={()=>feed.send({action:'circuit-prepare',year:sessionYear(session),path:activeCircuitJob?.identity?.path})}/>}</>}
+            onSelectDriver={wall?undefined:setSelectedDriver}
+          /> : <><p>No prepared circuit for this session. Timing remains available.</p>{!wall && import.meta.env.DEV && <PreparationPanel job={activeCircuitJob} disabled={!activeCircuitJob?.identity} onPrepare={()=>feed.send({action:'circuit-prepare',year:sessionYear(session),path:activeCircuitJob?.identity?.path})}/>}</>}
         </section>
       </div>
 
@@ -812,3 +812,6 @@ export default function LiveSession() {
     </main>
   );
 }
+
+function StandaloneSession({wall}){const feed=useRaceFeed();return <SessionContent feed={feed} wall={wall}/>;}
+export default function LiveSession({feed,wall=false}){return feed?<SessionContent feed={feed} wall={wall}/>:<StandaloneSession wall={wall}/>;}

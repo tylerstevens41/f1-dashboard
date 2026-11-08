@@ -115,7 +115,7 @@ def list_sessions(year):
         raise ValueError('Year must be 2018–2100')
     index = small_json(f'{int(year)}/Index.json')
     return [{'path': session['Path'], 'label': f"{meeting.get('Name', '')} ({meeting.get('Location', '')}) · {session.get('Name', '')}",
-             'start': session.get('StartDate'), 'year': int(year), 'session': session.get('Name'),
+             'start': session.get('StartDate'), 'gmtOffset':session.get('GmtOffset'), 'year': int(year), 'session': session.get('Name'),
              'event': meeting.get('Name'), 'location': meeting.get('Location'),
              'circuit': meeting.get('Circuit', {}), 'meetingKey': meeting.get('Key')}
             for meeting in index.get('Meetings', []) for session in meeting.get('Sessions', []) if session.get('Path')]

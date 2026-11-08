@@ -1,3 +1,5 @@
+import useRaceFeed from "./race/useRaceFeed";
+import {controllerView} from "./race/controllerView";
 
 import LiveRace from "./LiveRace";
 import { useEffect, useState } from "react";
@@ -156,7 +158,11 @@ function getCountdown(milliseconds) {
 }
 
 function App() {
-  const [view, setView] = useState("dashboard");
+  const feed=useRaceFeed();
+  const [wall]=useState(()=>window.location.pathname==='/wall'||new URLSearchParams(window.location.search).get('wall')==='1');
+  const [manualView,setView]=useState('dashboard');
+  const controller=feed.race.controller;
+  const view=controllerView(controller,manualView);
   const [nextRace, setNextRace] = useState(null);
   const [raceError, setRaceError] = useState("");
 
@@ -271,14 +277,21 @@ function App() {
   });
 
   return (
-    <div className="app">
+    <div className={wall?"app wall-display":"app"}>
       <header className="header">
         <div className="branding">
           <span className="brand-accent">F1</span>
           <h1>RACE CENTER</h1>
         </div>
 
-        <nav className="navigation">
+        {!wall && <div>
+          <button disabled={feed.connection!=='connected'} onClick={()=>feed.send({action:'controller-mode',mode:'AUTO'})} aria-pressed={controller?.mode==='AUTO'}>AUTO</button>
+          <button disabled={feed.connection!=='connected'} onClick={()=>{setView('live');feed.send({action:'controller-mode',mode:'MANUAL'});}} aria-pressed={controller?.mode==='MANUAL'}>MANUAL</button>
+          {feed.controlError&&<span role="alert">{feed.controlError}</span>}
+          <details><summary>Session controller diagnostics</summary><pre style={{maxHeight:220,overflow:'auto',fontSize:11}}>{JSON.stringify(controller??{state:'Waiting for controller-enabled backend'},null,2)}</pre></details>
+        </div>}
+        <small role="status">{controller?.mode??'Backend offline'} · {controller?.state??'Waiting'} · {feed.connection} · {feed.race.upstream}</small>
+        {!wall && <nav className="navigation">
           <button
             className={view === "dashboard" ? "active" : ""}
             onClick={() => setView("dashboard")}
@@ -292,7 +305,7 @@ function App() {
           >
             Live Race
           </button>
-        </nav>
+        </nav>}
       </header>
 
       {view === "dashboard" ? (
@@ -525,7 +538,7 @@ function App() {
           </section>
         </main>
       ) : (
-        <LiveRace />
+        <LiveRace feed={feed} wall={wall} />
       )}
     </div>
   );

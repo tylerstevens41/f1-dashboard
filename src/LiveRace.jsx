@@ -4,9 +4,12 @@ import AustinReplay from "./AustinReplay";
 import ReplayRace from "./ReplayRace";
 import LiveSession from "./LiveSession";
 
-export default function LiveRace() {
+export default function LiveRace({feed,wall=false}) {
   const [mode, setMode] = useState("live");
+  const automatic=feed?.race.controller?.mode==='AUTO';
+  const displayMode=automatic?'live':mode;
 
+  if(wall)return <LiveSession feed={feed} wall/>;
   return (
     <>
       <div
@@ -24,17 +27,17 @@ export default function LiveRace() {
           {mode === "live" ? "● LIVE" : "LIVE"}
         </button>
 
-        {import.meta.env.DEV && <button
+        {!automatic && import.meta.env.DEV && <button
           type="button"
           onClick={() => setMode("replay")}
           aria-pressed={mode === "replay"}
         >
           {mode === "replay" ? "● LEGACY OPENF1" : "LEGACY OPENF1"}
         </button>}
-        {import.meta.env.DEV && <button type="button" onClick={() => setMode("austin")} aria-pressed={mode === "austin"}>Legacy Austin Replay</button>}
+        {!automatic && import.meta.env.DEV && <button type="button" onClick={() => setMode("austin")} aria-pressed={mode === "austin"}>Legacy Austin Replay</button>}
       </div>
 
-      {mode === "live" ? <LiveSession /> : mode === "austin" ? <AustinReplay /> : <ReplayRace />}
+      {displayMode === "live" ? <LiveSession feed={feed} /> : displayMode === "austin" ? <AustinReplay /> : <ReplayRace />}
     </>
   );
 }

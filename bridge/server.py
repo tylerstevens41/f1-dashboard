@@ -11,6 +11,7 @@ from websockets.asyncio.server import serve
 from .archive import fetch_clip, list_sessions, load_recording, save_clip
 from .protocol import TOPICS, RaceState, merge
 from .playback_clock import PlaybackClock
+from .autonomous import name as session_name
 
 
 class Bridge:
@@ -31,6 +32,9 @@ class Bridge:
         self.gps_seen={}
         self.gps_diagnostics={'rawMessages':0,'rawReceivedUtcMs':None,'normalizedReceivedUtcMs':None,'lastSampleUtcMs':None,'identityDrops':0,'parseErrors':0,'subscriptionSnapshots':0,'connectionAttempts':0,'connectionLosses':0}
         self.offset = 0
+        self.last_live_delta=None
+        self.pending_live_delta=None
+        self.autonomy=None
         self.last_tick = time.monotonic()
 
     def configure_preparation(self, root=None, enabled=False):
@@ -138,6 +142,7 @@ class Bridge:
             info={**info,'offsetMs':offset}
         elif self.state.mode == 'LIVE':
             message['clockMs']=datetime.now(timezone.utc).timestamp()*1000
+        if self.autonomy and message.get('type') in ('snapshot','status'):message['controller']=self.autonomy.snapshot()
         if message.get('type') in ('snapshot','status') and self.state.mode=='LIVE':message['liveDiagnostics']=dict(self.gps_diagnostics)
         message['transportMs']=now*1000
         message['playbackInfo']=info
@@ -168,7 +173,7 @@ class Bridge:
                 if actual is not None or (info.get('StartDate')):
                     self.live_confirmed=(actual==expected['path']) if actual is not None else (
                         str(info.get('Meeting',{}).get('Circuit',{}).get('Key'))==str(expected['circuit']['Key']) and
-                        info.get('Name')==expected['session'] and str(info['StartDate'])[:10]==str(expected['start'])[:10])
+                        session_name(info.get('Name'))==session_name(expected['session']) and str(info['StartDate'])[:10]==str(expected.get('providerStartDate',expected['start']))[:10])
                     self.error=None if self.live_confirmed else 'The current LIVE feed is not the selected session. Waiting; no archive substitution.'
                     await self.status('connected' if self.live_confirmed else 'waiting-session')
             elif not self.live_confirmed:
@@ -198,6 +203,9 @@ class Bridge:
             self.gps_diagnostics['driversWithoutUtcHistory']=sum(not r.get('_history') for r in positions.values() if isinstance(r,dict))
             self.gps_diagnostics['normalizedDrivers']=len(valid)
             self.gps_diagnostics['coordinateRejects']=sum(r.get('_rejectedSamples',0) for r in positions.values() if isinstance(r,dict))
+        if self.state.mode=='LIVE' and self.pending_live_delta==topic:
+            if any(message.get('type')=='topic' for message in messages):self.last_live_delta=time.time()
+            self.pending_live_delta=None
         for message in messages:
             await self.broadcast(message)
 
@@ -243,7 +251,13 @@ class Bridge:
         await self.broadcast(self.snapshot())
         self.source_task = asyncio.create_task(self.run_live())
 
+    async def note_live_activity(self,topic):
+        if self.state.mode=='LIVE' and topic in ('Position.z','TimingData','CarData.z'):
+            self.pending_live_delta=topic
+
     async def begin_live_snapshot(self):
+        self.pending_live_delta=None
+        self.last_live_delta=None
         self.gps_seen={}
         self.gps_diagnostics['subscriptionSnapshots']+=1
         self.gps_diagnostics.update(rawReceivedUtcMs=None,normalizedReceivedUtcMs=None,lastSampleUtcMs=None)
@@ -255,7 +269,7 @@ class Bridge:
     async def run_live(self):
         try:
             from .live import DashboardClient
-            client = DashboardClient(self.emit, self.status, self.begin_live_snapshot)
+            client = DashboardClient(self.emit, self.status, self.begin_live_snapshot,self.note_live_activity)
             await client._run()  # pinned LiveF1 1.3.0 transport; see docs
         except asyncio.CancelledError:
             raise
@@ -264,6 +278,7 @@ class Bridge:
             await self.status('authentication-error' if type(exc).__name__=='AuthenticationError' else 'connection-error')
 
     async def start_clip(self, clip):
+        if self.autonomy:self.autonomy.mode('MANUAL')
         await self.stop_source()
         self.clip = clip
         self.timeline = PlaybackClock(clip['durationMs'],time.monotonic())
@@ -310,6 +325,15 @@ class Bridge:
             await asyncio.sleep(1)
 
     async def command(self, client, command):
+        if command.get('action')=='controller-mode':
+            try:
+                if not self.autonomy:raise ValueError('Controller unavailable')
+                self.autonomy.mode(command.get('mode'));await self.broadcast(self.snapshot())
+            except Exception:
+                await self.send(client,{'version':1,'type':'control-error','error':'Controller mode rejected. TEST is retained: switch to LIVE first before enabling AUTO.'})
+            return
+        if self.autonomy and command.get('action') in ('live','live-stop','load','play','pause','speed'):
+            self.autonomy.mode('MANUAL')
         if command.get('action') in ('circuit-lookup','circuit-prepare'):
             await self.circuit_command(client, command)
             return
@@ -411,18 +435,25 @@ class Bridge:
 
     async def run(self, args):
         self.configure_preparation(args.circuit_store, args.allow_prepare)
+        from .controller_service import ControllerService
+        forced='MANUAL' if getattr(args,'manual',False) else 'AUTO' if getattr(args,'auto',False) else None
+        self.autonomy=ControllerService(self,self.asset_store.root/'controller.json',forced)
         async with serve(self.connection, '127.0.0.1', args.port, max_size=65536,
                          origins=['http://localhost:5173','http://127.0.0.1:5173','http://localhost:4173','http://127.0.0.1:4173',None]):
             print(f'Bridge: ws://127.0.0.1:{args.port}; TEST controls {"enabled" if self.allow_test else "disabled"}')
             heartbeat = asyncio.create_task(self.heartbeat())
+            controller_task=asyncio.create_task(self.autonomy.run())
             try:
                 if args.recording:
                     await self.start_clip(load_recording(args.recording))
-                elif not args.idle:
+                elif not args.idle and self.autonomy.machine.mode=='MANUAL':
                     await self.start_live()
                 await asyncio.Future()
             finally:
                 heartbeat.cancel()
+                controller_task.cancel()
+                await asyncio.gather(heartbeat,controller_task,return_exceptions=True)
+                await self.autonomy.close()
                 await self.stop_source()
                 if self.recording_path and self.recording:
                     save_clip(self.recording_path,self.recording)
@@ -431,6 +462,9 @@ class Bridge:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    operating=parser.add_mutually_exclusive_group()
+    operating.add_argument('--auto',action='store_true',help='Explicitly enable autonomous session control (default on first startup).')
+    operating.add_argument('--manual',action='store_true',help='Developer override; never auto-switch LIVE/TEST.')
     parser.add_argument('--allow-prepare',action='store_true',help='Enable local, bounded circuit preparation jobs.')
     parser.add_argument('--circuit-store',help='Writable prepared circuit directory (default circuit-assets).')
     parser.add_argument('--port',type=int,default=8765)

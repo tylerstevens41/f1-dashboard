@@ -574,3 +574,11 @@
   position: relative;
   z-index: 1;
 }
+/* Read-only wall route keeps the existing dashboard identity and fonts. */
+.wall-display { min-height:100vh; }
+.wall-display .header { padding:10px 20px; }
+.wall-display .live-session-page { min-height:0; }
+.wall-display .live-session-layout { height:calc(100vh - 180px); min-height:420px; }
+.wall-display .live-session-tower { overflow-y:auto; }
+.wall-display .live-circuit-toolbar, .wall-display .calibration-debug-panel,
+.wall-display .circuit-dev-panel, .wall-display .live-circuit-bottom { display:none; }

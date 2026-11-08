@@ -4,8 +4,9 @@ from .protocol import TOPICS
 
 
 class DashboardClient(RealF1Client):
-    def __init__(self, emit, status, snapshot=None):
+    def __init__(self, emit, status, snapshot=None, activity=None):
         super().__init__(topics=list(TOPICS))
+        self.activity=activity
         self.snapshot = snapshot
         self.emit = emit
         self.status = status
@@ -38,4 +39,5 @@ class DashboardClient(RealF1Client):
         elif frame.get('target') == 'feed':
             args = frame.get('arguments') or []
             if len(args) >= 2:
+                if self.activity:await self.activity(args[0])
                 await self.emit(args[0], args[1], args[2] if len(args) > 2 else None)

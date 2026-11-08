@@ -5,6 +5,7 @@ export default function LiveControls({feed}){
  const {race,connection,send,liveSessions=[]}=feed;
  const info=race.topics.SessionInfo;
  return <div style={{padding:'8px 16px',background:'#151922',color:'white',display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+  <span>{race.controller?.mode??'MANUAL'} · {race.controller?.state??'manual live controls'}</span>
   <strong role="status">{liveTrackingStatus(race,connection,feed.clockMs)}</strong>
   <button disabled={connection!=='connected'} onClick={()=>send({action:'live-sessions'})}>Discover race sessions</button>
   <select aria-label="LIVE session" value={path} onChange={e=>setPath(e.target.value)}><option value="">Current LIVE feed (automatic)</option>{liveSessions.map(s=><option key={s.path} value={s.path}>{s.label}</option>)}</select>

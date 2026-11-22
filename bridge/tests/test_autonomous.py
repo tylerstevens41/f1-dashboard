@@ -226,6 +226,7 @@ class VegasSwitchingTests(IsolatedAsyncioTestCase):
             self.assertEqual(service.machine.mode,'AUTO')
             service.sessions=[advice];service.discovery_due=now+1000
             await service.tick(now-300);self.assertEqual(service.machine.state,'WAITING_FOR_SESSION')
+            bridge.start_live.assert_awaited_once_with(None);bridge.start_live.reset_mock()
             # Published metadata may arrive without the schedule's advisory ID,
             # with a different city label, at the UTC/local date boundary.
             service.sessions=[s]

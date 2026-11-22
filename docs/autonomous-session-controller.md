@@ -372,3 +372,14 @@ manual/TEST isolation, completion, backoff, cancellation and wall status renderi
 They do not establish authenticated LIVE visual success. If the race has ended,
 AUTO correctly stays/returns on Dashboard; validate during the next real active
 session rather than treating the expired countdown as evidence.
+
+
+Cold-start detail: when the yearly catalog still lacks the advisory's path, AUTO
+may open the existing single current LiveF1 subscription for **observation** during
+the normal monitoring window. It does not select a guessed session path or present
+LIVE on connection/countdown alone. It remains on Dashboard until all independent
+identity and freshness checks above pass. This allows the same reconciliation to
+work after pulling/restarting, when there is no pre-existing feed to adopt. Failed
+observers share the existing bounded connection retry/cooldown budget; a running
+observer is not duplicated. An unrelated, ended or incomplete provider session
+remains unapproved. No manual Start LIVE step is required for this bootstrap.

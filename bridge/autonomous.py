@@ -77,6 +77,18 @@ class SessionController:
 
     def checkpoint(self):return {'schema':'session-controller-v1','mode':self.mode,'completed':self.completed[-100:],'history':self.history[-100:]}
 
+    def request_connection(self,now,observe=False):
+        """One bounded retry budget for expected-session and current-feed observation."""
+        self.last_attempt_at=now
+        self.total_attempts+=1;self.attempts+=1
+        delay=min(60,2**min(self.attempts,6))
+        if self.attempts>=8:delay=300;self.attempts=0
+        self.retry_at=now+delay
+        if observe:
+            self.transition('WAITING_FOR_SESSION','observing current provider feed; identity/freshness not yet reconciled',now)
+        else:self.transition('CONNECTING' if not self.presenting else 'RECOVERING','bounded subscription attempt',now)
+        return 'connect'
+
     def tick(self,now,sessions,observation):
         if self.mode!='AUTO':return None
         if observation.get('dataMode')=='TEST':
@@ -154,13 +166,7 @@ class SessionController:
         refresh=observation.get('sourceRunning') and (quiet_live or missing_identity) and now-self.last_attempt_at>=60
         needs_connection=refresh or not observation.get('sourceRunning') or ('expectedPath' in observation and observation['expectedPath']!=selected['path'] and not adopted)
         if needs_connection and now>=self.retry_at:
-            self.last_attempt_at=now
-            self.total_attempts+=1;self.attempts+=1
-            delay=min(60,2**min(self.attempts,6))
-            if self.attempts>=8:delay=300;self.attempts=0
-            self.retry_at=now+delay
-            self.transition('CONNECTING' if not self.presenting else 'RECOVERING','bounded subscription attempt',now)
-            return 'connect'
+            return self.request_connection(now)
         return None
 
 

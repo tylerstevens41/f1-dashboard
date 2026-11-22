@@ -162,6 +162,15 @@ class ControllerService:
                 if self.bridge.live_expected is None:self.bridge.live_expected=selected
                 if not any(s.get('path')==selected['path'] for s in self.sessions):self.sessions.append(dict(selected))
             if action=='connect':await self.bridge.start_live(self.machine.selected)
+            elif (not action and self.machine.selected and not self.machine.selected.get('path') and
+                  not observation.get('sourceRunning') and now>=self.machine.retry_at and
+                  utc_start(self.machine.selected) is not None and
+                  now-43200<=utc_start(self.machine.selected)<=now+900):
+                # Cold start / restart: a year index can lag the live service.
+                # Observe its one current source without inventing an expected
+                # path; remain Dashboard until independent reconciliation passes.
+                self.machine.request_connection(now,observe=True)
+                await self.bridge.start_live(None)
             elif action=='stop':
                 await self.bridge.stop_source();self.bridge.state.reset('LIVE');self.bridge.error=None
                 self.bridge.state.upstream='idle';await self.bridge.broadcast(self.bridge.snapshot())

@@ -198,3 +198,21 @@ class ReconciliationServiceTests(IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]['sessionKey'],99901)
         self.assertIsNone(rows[0]['gmtOffset']);self.assertEqual(combine_schedule(rows,[]),[])
         self.assertIsNotNone(reconcile(NOW,advice(),observation(),catalog=rows)[0])
+
+    async def test_auto_restart_observes_current_feed_but_does_not_claim_live_until_verified(self):
+        with tempfile.TemporaryDirectory() as temp,patch('bridge.live_reconciliation.published_session_info',return_value=confirmation()):
+            bridge,service=self.setup_bridge(temp)
+            bridge.source_task=None;bridge.state.topics={};bridge.state.upstream='idle';bridge.last_live_delta=None
+            await service.tick(NOW)
+            bridge.start_live.assert_awaited_once_with(None)
+            self.assertEqual(service.snapshot()['view'],'dashboard')
+            # Even if a failed observer ends immediately, no per-tick retry.
+            await service.tick(NOW+.1);self.assertEqual(bridge.start_live.await_count,1)
+            bridge.source_task=SimpleNamespace(done=lambda:False)
+            bridge.state.upstream='connected';bridge.last_live_delta=NOW+1
+            bridge.state.topics={'SessionInfo':info(),'SessionStatus':{'Status':'Started'},
+                                 'Position.z':{'1':{'X':100,'Y':200,'_sampleTimeMs':(NOW+1)*1000}}}
+            await service.tick(NOW+1);await service.identity_task;await service.tick(NOW+2)
+            self.assertEqual(service.machine.state,'LIVE');self.assertEqual(service.snapshot()['view'],'live')
+            self.assertEqual(bridge.start_live.await_count,1)
+            bridge.stop_source.assert_not_awaited();await service.close()

@@ -117,7 +117,7 @@ def list_sessions(year):
     return [{'path': session['Path'], 'label': f"{meeting.get('Name', '')} ({meeting.get('Location', '')}) · {session.get('Name', '')}",
              'start': session.get('StartDate'), 'gmtOffset':session.get('GmtOffset'), 'year': int(year), 'session': session.get('Name'),
              'event': meeting.get('Name'), 'location': meeting.get('Location'),
-             'circuit': meeting.get('Circuit', {}), 'meetingKey': meeting.get('Key')}
+             'circuit': meeting.get('Circuit', {}), 'meetingKey': meeting.get('Key'), 'sessionKey':session.get('Key')}
             for meeting in index.get('Meetings', []) for session in meeting.get('Sessions', []) if session.get('Path')]
 
 

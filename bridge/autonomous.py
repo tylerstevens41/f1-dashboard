@@ -51,10 +51,12 @@ class SessionController:
         self.completed=list(saved.get('completed',[]))[-100:]
         self.history=list(saved.get('history',[]))[-100:];self.reason='startup; live identity requires revalidation'
         self.changed_at=0;self.last_live=None;self.completion_since=None;self.completion_observations=0
+        self.reconciliation={'status':'not-attempted'}
         self.presenting=False;self.last_attempt_at=0;self.retry_at=0;self.attempts=0;self.total_attempts=0;self.circuit='not-resolved'
 
     def set_mode(self,mode,now):
         if mode not in ('AUTO','MANUAL'):raise ValueError('Invalid controller mode')
+        self.reconciliation={'status':'not-attempted'}
         self.mode=mode;self.selected=None;self.last_live=None;self.presenting=False;self.completion_since=None
         self.retry_at=0;self.attempts=0
         self.transition('DASHBOARD','explicit '+mode+' selection',now)
@@ -71,7 +73,7 @@ class SessionController:
         return {'mode':self.mode,'state':self.state,'view':'live' if self.state in LIVE_STATES and self.presenting else 'dashboard',
                 'selected':self.selected,'upcoming':self.upcoming,'reason':self.reason,'changedAt':self.changed_at,
                 'lastTelemetryAt':self.last_live,'retryAt':self.retry_at,'retryAttempts':self.total_attempts,
-                'circuit':self.circuit,'history':self.history[-20:]}
+                'circuit':self.circuit,'reconciliation':self.reconciliation,'history':self.history[-20:]}
 
     def checkpoint(self):return {'schema':'session-controller-v1','mode':self.mode,'completed':self.completed[-100:],'history':self.history[-100:]}
 
@@ -106,6 +108,7 @@ class SessionController:
             self.selected=(actual or eligible[-1][1]);self.attempts=0;self.retry_at=0
             self.transition('WAITING_FOR_SESSION','monitor window; validate published identity',now)
         selected=self.selected
+        adopted=False
         if not selected.get('path'):
             # Schedule may precede publication. Replace advisory only with an
             # actual matching provider entry on a later discovery poll.
@@ -114,7 +117,15 @@ class SessionController:
             replacement=replacements[0] if len(replacements)==1 else None
             if replacement:self.selected=replacement;selected=replacement
             else:
-                self.transition('WAITING_FOR_SESSION','schedule available; provider session not published',now);return None
+                from .live_reconciliation import reconcile
+                candidate,self.reconciliation=reconcile(now,selected,observation,
+                    observation.get('providerIdentity'),observation.get('publishedSessions',()))
+                if candidate and candidate['path'] in self.completed:
+                    candidate=None;self.reconciliation={'status':'blocked','reason':'session-already-completed'}
+                if candidate:
+                    self.selected=selected=candidate;adopted=True
+                else:
+                    self.transition('WAITING_FOR_SESSION','schedule available; provider session not published or independently reconciled',now);return None
         matches=identity_matches(selected,info)
         status=observation.get('status');red=observation.get('trackStatus')=='5'
         fresh=observation.get('freshGps',False) or observation.get('freshDelta',False)
@@ -141,7 +152,7 @@ class SessionController:
         quiet_live=matches and self.presenting and status in ('Started','Resumed') and not red and self.last_live is not None and now-self.last_live>60
         missing_identity=not matches and now>(utc_start(selected) or now)+30
         refresh=observation.get('sourceRunning') and (quiet_live or missing_identity) and now-self.last_attempt_at>=60
-        needs_connection=refresh or not observation.get('sourceRunning') or ('expectedPath' in observation and observation['expectedPath']!=selected['path'])
+        needs_connection=refresh or not observation.get('sourceRunning') or ('expectedPath' in observation and observation['expectedPath']!=selected['path'] and not adopted)
         if needs_connection and now>=self.retry_at:
             self.last_attempt_at=now
             self.total_attempts+=1;self.attempts+=1

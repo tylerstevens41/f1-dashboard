@@ -65,3 +65,15 @@ test('wall App renders race rather than zero-countdown Dashboard from shared bac
   assert.doesNotMatch(render(),/LIVE TIMING/);assert.match(render(),/LIGHTS OUT IN/);assert.equal((render().match(/>00<\/strong>/g)??[]).length,4);
  }finally{globalThis.window=oldWindow;delete globalThis.__syntheticWallFeed;await server.close();}
 });
+
+
+test('reconciled provider session status promotes the waiting Vegas wall without navigation or countdown evidence',()=>{
+ const path='2026/2026-11-21_Las_Vegas_Grand_Prix/2026-11-21_Race/';
+ let race=raceReducer(initialRaceState(),{version:1,type:'snapshot',generation:1,sequence:1,mode:'LIVE',topics:{},controller:{mode:'AUTO',view:'dashboard',state:'WAITING_FOR_SESSION',selected:{path:null}}});
+ assert.equal(controllerView(race.controller,'dashboard',{wall:true,dataMode:race.mode}),'dashboard');
+ const controller={mode:'AUTO',view:'live',state:'LIVE',selected:{path},reconciliation:{status:'verified-current-provider-session'}};
+ race=raceReducer(race,{version:1,type:'status',generation:1,sequence:2,mode:'LIVE',controller});
+ assert.equal(controllerView(race.controller,'dashboard',{wall:true,dataMode:race.mode}),'live');
+ assert.equal(race.controller.selected.path,path);
+ assert.equal(controllerView(raceReducer(initialRaceState(),{version:1,type:'snapshot',generation:1,sequence:2,mode:'LIVE',topics:{},controller}).controller,'dashboard',{wall:true,dataMode:'LIVE'}),'live');
+});

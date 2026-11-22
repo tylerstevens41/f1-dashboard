@@ -287,3 +287,88 @@ identities, ambiguous metadata, red flags, completion and session-reset clocks.
 Actual authenticated wall switching must still be observed locally. If it remains
 on Dashboard, copy only the `/dev` Session controller diagnostics JSON (no tokens,
 raw telemetry or account details) so the remaining runtime cause can be identified.
+
+## Confirmed path-less Vegas advisory with a working feed
+
+The supplied local diagnostics establish a different, specific failure: AUTO
+selected a Race advisory with `path: null`, while the existing LIVE source had
+real `SessionInfo.Path` and status Started. The path-less branch returned before
+examining an alternative provider identity. Discovery read the yearly archive
+index only; realtime SessionInfo was not a source of candidates. In addition,
+`combine_schedule` excludes index records with unusable start/GMT metadata unless
+an advisory can be matched. An absent/late index entry and an excluded untimed
+entry were previously indistinguishable. The exact upstream omission requires
+local catalog counts; it is not inferred from the identityConfirmed flag.
+
+AUTO now reconciles that narrow case through `live_reconciliation.py`:
+
+- Require LIVE mode, a connected running source, current Started/Resumed status,
+  existing identity confirmation **and** fresh measured GPS or accepted live
+  timing/telemetry deltas. None of these booleans alone is approval.
+- Require raw provider SessionInfo with concrete session/meeting/circuit keys,
+  circuit and meeting names, session type, a canonical relative provider path,
+  target/current year, valid local/path dates and UTC/GMT start alignment. Match
+  the selected advisory's event/type/year/time and any explicit circuit/meeting
+  identity. A manually selected expected path is never a source of identity.
+- Independently corroborate with a complete matching raw year-index entry
+  (including session key, now retained by list_sessions). An entry with missing
+  GMT may still corroborate an identical literal StartDate; its timezone is not
+  guessed. The current provider feed must supply a valid time basis.
+- Otherwise query that session's authenticated Index.json and its **declared**
+  SessionInfo StreamPath. Merge at most 128 metadata records / 1 MiB, then compare
+  its keys/type/path/date/start/circuit against the live feed. No GPS archive,
+  whole session download, fabricated path or different session is substituted.
+- Conflicting/ambiguous catalog entries, missing metadata, stale data, wrong dates,
+  manual/TEST mode and previously completed sessions remain blocked. Endpoint
+  failure stays blocked with sanitized errors and 30–300 second backoff.
+- Metadata requests run off the event loop, not under a blocking network wait.
+  Mode/session changes invalidate pending work. Successful reconciliation binds
+  the verified identity to the **existing** source without stop/start, a second
+  LiveF1 subscription or another WebSocket. Normal completion, red flags, stale
+  GPS and runtime circuit compatibility retain their existing safeguards.
+
+`reconciliation.status: verified-current-provider-session` means provider session
+identity was reconciled; it does not mark circuit geometry/annotations verified.
+With fresh GPS, controller state becomes LIVE and view becomes live; with only
+fresh timing evidence, LIVE_STALE still presents the race while GPS remains gated.
+
+### Pull, restart and verify locally
+
+Stop the old backend and frontend with Ctrl+C. Do not delete controller history,
+regenerate Vegas or enable TEST for this check:
+
+```powershell
+git fetch origin
+git switch feat/production-live-ui-cleanup
+git pull --ff-only origin feat/production-live-ui-cleanup
+.\.venv\Scripts\python.exe -m bridge.server --auto --login
+```
+
+In another terminal run `npm run dev`, open http://localhost:5173/wall and hard
+refresh with Ctrl+F5. Do not press Start LIVE in /dev to initiate AUTO. If a real
+feed is already running when AUTO is selected, it can now be adopted after the
+same independent checks rather than restarted. `/dev` may be opened read-only
+for diagnostics and does not need to stay open.
+
+Inspect Session controller diagnostics:
+
+- `selected.path`: the actual provider Race directory, rather than null.
+- `state`: LIVE / LIVE_STALE; `view`: live.
+- `reconciliation.status`: verified-current-provider-session; `source` identifies
+  year-index or independent-session-metadata. Blocked cases include an exact
+  non-sensitive reason, rather than inferring success from countdown or flags.
+- `catalogDiagnostics.feedPathEntries` vs `feedPathEntriesWithUsableStart`:
+  zero entries means the raw current index did not supply that path; entries
+  without usable start reveal time-metadata exclusion. These are raw-year-index
+  counts, distinct from controllerPathCandidates.
+- `providerIdentityCheck.state`: year-index-confirmed, checking, received or
+  unavailable, with retry timing/sanitized errors. Received alone is not approval;
+  reconciliation must validate the returned document against the current feed.
+
+Tests use the user-supplied Vegas path with synthetic keys/GPS/statuses. They
+exercise the exact missing-candidate condition, independent corroboration, raw
+untimed index records, absent/conflicting identities, UTC/local dates, stale GPS,
+manual/TEST isolation, completion, backoff, cancellation and wall status rendering.
+They do not establish authenticated LIVE visual success. If the race has ended,
+AUTO correctly stays/returns on Dashboard; validate during the next real active
+session rather than treating the expired countdown as evidence.

@@ -215,3 +215,75 @@ index returned authentication-required. This confirms advisory parsing only, not
 real identity validation or an autonomous live session. A bounded metadata catalog
 is retained for restart monitoring, but never restores active tracking approval;
 an actual matching source and fresh telemetry are still required.
+
+## Las Vegas wall switching regression
+
+Confirmed code paths (synthetic reproduction, not authenticated race observation):
+
+1. `--auto` correctly overrides a persisted MANUAL checkpoint at startup. However,
+   pressing Start LIVE in `/dev` deliberately switches the shared backend to
+   MANUAL. Previously `/wall` then used its own per-tab manual navigation default
+   (`dashboard`), even while `/dev` displayed the shared working live feed. Wall
+   now mirrors the backend's requested manual LIVE session; developer navigation
+   remains independent. It never mirrors TEST. This view choice is not a claim
+   that GPS is fresh: the existing waiting/stale/identity/calibration guards stay.
+2. AUTO could remain on a path-less advisory when published metadata used a
+   different locality label and had no copied advisory ID. Advisory correlation
+   now permits exact normalized event-name agreement as well as locality, with
+   matching session type/time proximity and a unique provider candidate. It still
+   requires actual provider identity and fresh telemetry before AUTO enters LIVE.
+   Ambiguous or unrelated events are not adopted. GMT offsets and UTC/local date
+   boundaries retain their existing interpretation; no countdown-based activation.
+3. RaceState's internal session-reset snapshot did not contain the controller
+   snapshot and could temporarily erase presentation state in React. It now
+   carries the backend control plane without changing telemetry/GPS timestamps.
+   Controller transitions also publish a status envelope immediately on the same
+   existing WebSocket, in addition to reconnect snapshots/periodic heartbeats.
+
+The user's exact runtime trigger cannot be established without their current
+controller diagnostics. These reproducible paths are corrected; neither a zero
+countdown nor successful mock tests establishes real LIVE validation.
+
+### Windows validation
+
+Stop the old backend and Vite processes (Ctrl+C) so only one backend owns port 8765:
+
+```powershell
+git fetch origin
+git switch feat/production-live-ui-cleanup
+git pull --ff-only origin feat/production-live-ui-cleanup
+.\.venv\Scripts\python.exe -m bridge.server --auto --login
+```
+
+In another terminal: `npm run dev`. Open http://localhost:5173/wall and hard-refresh
+with Ctrl+F5. Do not press Start LIVE or load TEST to initiate normal AUTO operation.
+The wall should switch only after the backend validates the published session and
+fresh real telemetry. Existing locally prepared Vegas assets are untouched.
+
+For optional inspection open http://localhost:5173/dev without changing modes.
+The controller diagnostics should show `mode: AUTO`, a real selected session path,
+`state: LIVE` (or LIVE_STALE/recovery), `view: live`, and `feedEvidence` containing
+`dataMode: LIVE`, the provider session path/status, identity confirmation and source
+running state. Discovery timestamps/errors explain publication or authentication
+waits. `reason` explains every transition. No need to delete controller.json,
+regenerate Vegas, reset caches, or keep `/dev` open.
+
+If you intentionally press Start LIVE in `/dev`, backend mode becomes MANUAL;
+`manualPresentation: live` makes the wall mirror it while retaining manual source
+ownership. Its normal disconnected/stale/waiting indicators still apply. Stop LIVE
+clears that presentation. TEST stays isolated. To return to unattended AUTO, switch
+back to LIVE if in TEST, then explicitly select AUTO; or restart using `--auto`.
+
+Confirmed provider completion (debounced by AUTO) returns the wall to Dashboard.
+Red flags and temporary telemetry loss do not count as completion. In MANUAL, an
+explicit end status returns the wall to Dashboard (red-flag Finished remains live
+until finalised); this does not enable automatic source management in MANUAL.
+
+Regression tests cover a published synthetic Vegas Race at the UTC/local date
+boundary with fresh GPS, a prior unmatched advisory, explicit AUTO over persisted
+MANUAL, immediate status/snapshot propagation, actual wall App rendering despite
+an expired zero-countdown fixture, shared manual LIVE, TEST isolation, mismatched
+identities, ambiguous metadata, red flags, completion and session-reset clocks.
+Actual authenticated wall switching must still be observed locally. If it remains
+on Dashboard, copy only the `/dev` Session controller diagnostics JSON (no tokens,
+raw telemetry or account details) so the remaining runtime cause can be identified.

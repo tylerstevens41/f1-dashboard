@@ -109,7 +109,9 @@ class SessionController:
         if not selected.get('path'):
             # Schedule may precede publication. Replace advisory only with an
             # actual matching provider entry on a later discovery poll.
-            replacement=next((s for _,s in eligible if s.get('path') and s.get('advisoryId')==selected.get('advisoryId')),None)
+            replacements=[s for _,s in eligible if s.get('path') and
+                          ((selected.get('advisoryId') and s.get('advisoryId')==selected['advisoryId']) or advisory_matches(s,selected))]
+            replacement=replacements[0] if len(replacements)==1 else None
             if replacement:self.selected=replacement;selected=replacement
             else:
                 self.transition('WAITING_FOR_SESSION','schedule available; provider session not published',now);return None
@@ -151,19 +153,25 @@ class SessionController:
         return None
 
 
+def advisory_matches(published,advice):
+    """Link a schedule hint to published metadata; never approve LIVE identity."""
+    def norm(text):return re.sub(r'[^a-z0-9]','',unicodedata.normalize('NFKD',str(text or '')).encode('ascii','ignore').decode().lower())
+    if name(published.get('session'))!=name(advice.get('session')):return False
+    venue=norm(published.get('location'))
+    event=norm(published.get('event'))
+    if not (venue and venue==norm(advice.get('location')) or event and event==norm(advice.get('event'))):return False
+    a,b=utc_start(published),utc_start(advice)
+    if a is not None and b is not None:return abs(a-b)<=43200
+    try:return abs((datetime.fromisoformat(str(published.get('start'))[:10])-datetime.fromisoformat(str(advice.get('start'))[:10])).days)<=1
+    except ValueError:return False
+
+
 def combine_schedule(published,advisories):
     """Advisory timestamps may schedule monitoring, never invent provider paths."""
-    def norm(text):return re.sub(r'[^a-z0-9]','',unicodedata.normalize('NFKD',str(text)).encode('ascii','ignore').decode().lower())
     published=list({s['path']:s for s in published if isinstance(s,dict) and s.get('path')}.values())
-    def same_day(s,advice):
-        a,b=utc_start(s),utc_start(advice)
-        if a is not None and b is not None:return abs(a-b)<=43200
-        try:return abs((datetime.fromisoformat(str(s.get('start'))[:10])-datetime.fromisoformat(advice['start'][:10])).days)<=1
-        except ValueError:return False
     output=[];used=set()
     for advice in advisories:
-        matches=[s for s in published if name(s.get('session'))==advice['session'] and
-                 norm(s.get('location'))==norm(advice.get('location')) and same_day(s,advice)]
+        matches=[s for s in published if advisory_matches(s,advice)]
         if len(matches)==1:
             s=dict(matches[0]);s['advisoryId']=advice['advisoryId']
             if utc_start(s) is None:

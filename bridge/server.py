@@ -207,6 +207,10 @@ class Bridge:
             if any(message.get('type')=='topic' for message in messages):self.last_live_delta=time.time()
             self.pending_live_delta=None
         for message in messages:
+            if self.autonomy and message.get('type') in ('snapshot','status'):
+                # RaceState can emit an internal session-reset snapshot. Keep
+                # the control plane on it without changing telemetry clocks.
+                message['controller']=self.autonomy.snapshot()
             await self.broadcast(message)
 
     def capture(self, topic, payload):

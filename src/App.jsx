@@ -162,7 +162,7 @@ function App() {
   const [{wall,developer}]=useState(()=>viewAccess(window.location.pathname,window.location.search));
   const [manualView,setView]=useState('dashboard');
   const controller=feed.race.controller;
-  const view=controllerView(controller,manualView);
+  const view=controllerView(controller,manualView,{wall,dataMode:feed.race.mode});
   const [nextRace, setNextRace] = useState(null);
   const [raceError, setRaceError] = useState("");
 
@@ -290,7 +290,7 @@ function App() {
           {feed.controlError&&<span role="alert">{feed.controlError}</span>}
           <details><summary>Session controller diagnostics</summary><pre style={{maxHeight:220,overflow:'auto',fontSize:11}}>{JSON.stringify(controller??{state:'Waiting for controller-enabled backend'},null,2)}</pre></details>
         </div>}
-        <small role="status">{developer ? `${controller?.mode??'Backend offline'} · ${controller?.state??'Waiting'} · ${feed.connection} · ${feed.race.upstream}` : (feed.connection!=='connected' ? 'Connecting to race updates…' : controller?.view==='live' ? 'Session coverage' : 'Waiting for the next session')}</small>
+        <small role="status">{developer ? `${controller?.mode??'Backend offline'} · ${controller?.state??'Waiting'} · ${feed.connection} · ${feed.race.upstream}` : (feed.connection!=='connected' ? 'Connecting to race updates…' : view==='live' ? 'Session coverage' : 'Waiting for the next session')}</small>
         {!wall && <nav className="navigation">
           <button
             className={view === "dashboard" ? "active" : ""}

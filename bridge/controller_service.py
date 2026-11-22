@@ -16,7 +16,7 @@ class ControllerService:
             try:
                 from .preparation import read_json
                 saved=read_json(self.path)
-                if saved.get('schema')!='session-controller-v1':saved={}
+                if not isinstance(saved,dict) or saved.get('schema')!='session-controller-v1':saved={}
             except (OSError,ValueError):pass
         self.machine=SessionController(saved)
         if force_mode:self.machine.set_mode(force_mode,time.time())
@@ -25,10 +25,23 @@ class ControllerService:
         self.discovery_due=0;self.last_discovery=saved.get('lastDiscoveryAt');self.discovery_failures=0
         self.discovery_error=None;self.last_checkpoint=None;self.asset_token=None;self.asset_due=0
         self.discovery_task=None
-        self.asset_error=None;self.last_asset_stamp=None
+        self.asset_error=None;self.last_asset_stamp=None;self.last_presentation=None
 
     def snapshot(self):
-        return {**self.machine.snapshot(),'lastDiscoveryAt':self.last_discovery,'discoveryRetryAt':self.discovery_due,
+        state=self.bridge.state
+        info=state.topics.get('SessionInfo',{})
+        status=state.topics.get('SessionStatus',{}).get('Status')
+        # A manual LIVE command owns the shared feed. A read-only wall mirrors
+        # that requested session (including waiting/recovery UI), never TEST.
+        # This is a view choice, not an assertion of fresh GPS or active racing.
+        ended=status=='Finalised' or status in ('Finished','Ended','Ends') and str(state.topics.get('TrackStatus',{}).get('Status',''))!='5'
+        manual_live=(self.machine.mode=='MANUAL' and state.mode=='LIVE' and bool(info) and
+                     self.bridge.live_confirmed and not ended)
+        return {**self.machine.snapshot(),'manualPresentation':'live' if manual_live else 'dashboard',
+                'feedEvidence':{'dataMode':state.mode,'identityConfirmed':self.bridge.live_confirmed,
+                                'sessionPath':info.get('Path'),'sessionStatus':status,
+                                'sourceRunning':bool(self.bridge.source_task and not self.bridge.source_task.done())},
+                'lastDiscoveryAt':self.last_discovery,'discoveryRetryAt':self.discovery_due,
                 'circuitIdentity':{'year':self.asset_token[0],'key':self.asset_token[1]} if self.asset_token else None,
                 'discoveryFailures':self.discovery_failures,'discoveryError':self.discovery_error,'assetError':self.asset_error}
 
@@ -109,6 +122,14 @@ class ControllerService:
                         await self.bridge.broadcast({'version':1,'type':'circuit-assets','bundle':asset})
                 except Exception as exc:self.asset_error=safe_exception(exc,'cache');self.machine.circuit='asset-error'
             self.persist()
+            presentation=self.machine.snapshot()
+            marker=(presentation['mode'],presentation['state'],presentation['view'],presentation['reason'],
+                    (presentation['selected'] or {}).get('path'),presentation['circuit'])
+            if marker!=self.last_presentation:
+                self.last_presentation=marker
+                # Publish transitions explicitly on the existing control channel;
+                # heartbeat also carries this snapshot for reconnect/refresh.
+                await self.bridge.broadcast(self.bridge.transport_message('status',error=self.bridge.error))
 
     async def run(self):
         while True:

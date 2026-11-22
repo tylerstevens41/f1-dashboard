@@ -215,3 +215,340 @@ index returned authentication-required. This confirms advisory parsing only, not
 real identity validation or an autonomous live session. A bounded metadata catalog
 is retained for restart monitoring, but never restores active tracking approval;
 an actual matching source and fresh telemetry are still required.
+
+## Las Vegas wall switching regression
+
+Confirmed code paths (synthetic reproduction, not authenticated race observation):
+
+1. `--auto` correctly overrides a persisted MANUAL checkpoint at startup. However,
+   pressing Start LIVE in `/dev` deliberately switches the shared backend to
+   MANUAL. Previously `/wall` then used its own per-tab manual navigation default
+   (`dashboard`), even while `/dev` displayed the shared working live feed. Wall
+   now mirrors the backend's requested manual LIVE session; developer navigation
+   remains independent. It never mirrors TEST. This view choice is not a claim
+   that GPS is fresh: the existing waiting/stale/identity/calibration guards stay.
+2. AUTO could remain on a path-less advisory when published metadata used a
+   different locality label and had no copied advisory ID. Advisory correlation
+   now permits exact normalized event-name agreement as well as locality, with
+   matching session type/time proximity and a unique provider candidate. It still
+   requires actual provider identity and fresh telemetry before AUTO enters LIVE.
+   Ambiguous or unrelated events are not adopted. GMT offsets and UTC/local date
+   boundaries retain their existing interpretation; no countdown-based activation.
+3. RaceState's internal session-reset snapshot did not contain the controller
+   snapshot and could temporarily erase presentation state in React. It now
+   carries the backend control plane without changing telemetry/GPS timestamps.
+   Controller transitions also publish a status envelope immediately on the same
+   existing WebSocket, in addition to reconnect snapshots/periodic heartbeats.
+
+The user's exact runtime trigger cannot be established without their current
+controller diagnostics. These reproducible paths are corrected; neither a zero
+countdown nor successful mock tests establishes real LIVE validation.
+
+### Windows validation
+
+Stop the old backend and Vite processes (Ctrl+C) so only one backend owns port 8765:
+
+```powershell
+git fetch origin
+git switch feat/production-live-ui-cleanup
+git pull --ff-only origin feat/production-live-ui-cleanup
+.\.venv\Scripts\python.exe -m bridge.server --auto --login
+```
+
+In another terminal: `npm run dev`. Open http://localhost:5173/wall and hard-refresh
+with Ctrl+F5. Do not press Start LIVE or load TEST to initiate normal AUTO operation.
+The wall should switch only after the backend validates the published session and
+fresh real telemetry. Existing locally prepared Vegas assets are untouched.
+
+For optional inspection open http://localhost:5173/dev without changing modes.
+The controller diagnostics should show `mode: AUTO`, a real selected session path,
+`state: LIVE` (or LIVE_STALE/recovery), `view: live`, and `feedEvidence` containing
+`dataMode: LIVE`, the provider session path/status, identity confirmation and source
+running state. Discovery timestamps/errors explain publication or authentication
+waits. `reason` explains every transition. No need to delete controller.json,
+regenerate Vegas, reset caches, or keep `/dev` open.
+
+If you intentionally press Start LIVE in `/dev`, backend mode becomes MANUAL;
+`manualPresentation: live` makes the wall mirror it while retaining manual source
+ownership. Its normal disconnected/stale/waiting indicators still apply. Stop LIVE
+clears that presentation. TEST stays isolated. To return to unattended AUTO, switch
+back to LIVE if in TEST, then explicitly select AUTO; or restart using `--auto`.
+
+Confirmed provider completion (debounced by AUTO) returns the wall to Dashboard.
+Red flags and temporary telemetry loss do not count as completion. In MANUAL, an
+explicit end status returns the wall to Dashboard (red-flag Finished remains live
+until finalised); this does not enable automatic source management in MANUAL.
+
+Regression tests cover a published synthetic Vegas Race at the UTC/local date
+boundary with fresh GPS, a prior unmatched advisory, explicit AUTO over persisted
+MANUAL, immediate status/snapshot propagation, actual wall App rendering despite
+an expired zero-countdown fixture, shared manual LIVE, TEST isolation, mismatched
+identities, ambiguous metadata, red flags, completion and session-reset clocks.
+Actual authenticated wall switching must still be observed locally. If it remains
+on Dashboard, copy only the `/dev` Session controller diagnostics JSON (no tokens,
+raw telemetry or account details) so the remaining runtime cause can be identified.
+
+## Confirmed path-less Vegas advisory with a working feed
+
+The supplied local diagnostics establish a different, specific failure: AUTO
+selected a Race advisory with `path: null`, while the existing LIVE source had
+real `SessionInfo.Path` and status Started. The path-less branch returned before
+examining an alternative provider identity. Discovery read the yearly archive
+index only; realtime SessionInfo was not a source of candidates. In addition,
+`combine_schedule` excludes index records with unusable start/GMT metadata unless
+an advisory can be matched. An absent/late index entry and an excluded untimed
+entry were previously indistinguishable. The exact upstream omission requires
+local catalog counts; it is not inferred from the identityConfirmed flag.
+
+AUTO now reconciles that narrow case through `live_reconciliation.py`:
+
+- Require LIVE mode, a connected running source, current Started/Resumed status,
+  existing identity confirmation **and** fresh measured GPS or accepted live
+  timing/telemetry deltas. None of these booleans alone is approval.
+- Require raw provider SessionInfo with concrete session/meeting/circuit keys,
+  circuit and meeting names, session type, a canonical relative provider path,
+  target/current year, valid local/path dates and UTC/GMT start alignment. Match
+  the selected advisory's event/type/year/time and any explicit circuit/meeting
+  identity. A manually selected expected path is never a source of identity.
+- Independently corroborate with a complete matching raw year-index entry
+  (including session key, now retained by list_sessions). An entry with missing
+  GMT may still corroborate an identical literal StartDate; its timezone is not
+  guessed. The current provider feed must supply a valid time basis.
+- Otherwise query that session's authenticated Index.json and its **declared**
+  SessionInfo StreamPath. Merge at most 128 metadata records / 1 MiB, then compare
+  its keys/type/path/date/start/circuit against the live feed. No GPS archive,
+  whole session download, fabricated path or different session is substituted.
+- Conflicting/ambiguous catalog entries, missing metadata, stale data, wrong dates,
+  manual/TEST mode and previously completed sessions remain blocked. Endpoint
+  failure stays blocked with sanitized errors and 30–300 second backoff.
+- Metadata requests run off the event loop, not under a blocking network wait.
+  Mode/session changes invalidate pending work. Successful reconciliation binds
+  the verified identity to the **existing** source without stop/start, a second
+  LiveF1 subscription or another WebSocket. Normal completion, red flags, stale
+  GPS and runtime circuit compatibility retain their existing safeguards.
+
+`reconciliation.status: verified-current-provider-session` means provider session
+identity was reconciled; it does not mark circuit geometry/annotations verified.
+With fresh GPS, controller state becomes LIVE and view becomes live; with only
+fresh timing evidence, LIVE_STALE still presents the race while GPS remains gated.
+
+### Pull, restart and verify locally
+
+Stop the old backend and frontend with Ctrl+C. Do not delete controller history,
+regenerate Vegas or enable TEST for this check:
+
+```powershell
+git fetch origin
+git switch feat/production-live-ui-cleanup
+git pull --ff-only origin feat/production-live-ui-cleanup
+.\.venv\Scripts\python.exe -m bridge.server --auto --login
+```
+
+In another terminal run `npm run dev`, open http://localhost:5173/wall and hard
+refresh with Ctrl+F5. Do not press Start LIVE in /dev to initiate AUTO. If a real
+feed is already running when AUTO is selected, it can now be adopted after the
+same independent checks rather than restarted. `/dev` may be opened read-only
+for diagnostics and does not need to stay open.
+
+Inspect Session controller diagnostics:
+
+- `selected.path`: the actual provider Race directory, rather than null.
+- `state`: LIVE / LIVE_STALE; `view`: live.
+- `reconciliation.status`: verified-current-provider-session; `source` identifies
+  year-index or independent-session-metadata. Blocked cases include an exact
+  non-sensitive reason, rather than inferring success from countdown or flags.
+- `catalogDiagnostics.feedPathEntries` vs `feedPathEntriesWithUsableStart`:
+  zero entries means the raw current index did not supply that path; entries
+  without usable start reveal time-metadata exclusion. These are raw-year-index
+  counts, distinct from controllerPathCandidates.
+- `providerIdentityCheck.state`: year-index-confirmed, checking, received or
+  unavailable, with retry timing/sanitized errors. Received alone is not approval;
+  reconciliation must validate the returned document against the current feed.
+
+Tests use the user-supplied Vegas path with synthetic keys/GPS/statuses. They
+exercise the exact missing-candidate condition, independent corroboration, raw
+untimed index records, absent/conflicting identities, UTC/local dates, stale GPS,
+manual/TEST isolation, completion, backoff, cancellation and wall status rendering.
+They do not establish authenticated LIVE visual success. If the race has ended,
+AUTO correctly stays/returns on Dashboard; validate during the next real active
+session rather than treating the expired countdown as evidence.
+
+
+Cold-start detail: when the yearly catalog still lacks the advisory's path, AUTO
+may open the existing single current LiveF1 subscription for **observation** during
+the normal monitoring window. It does not select a guessed session path or present
+LIVE on connection/countdown alone. It remains on Dashboard until all independent
+identity and freshness checks above pass. This allows the same reconciliation to
+work after pulling/restarting, when there is no pre-existing feed to adopt. Failed
+observers share the existing bounded connection retry/cooldown budget; a running
+observer is not duplicated. An unrelated, ended or incomplete provider session
+remains unapproved. No manual Start LIVE step is required for this bootstrap.
+
+## Metadata authentication versus the working LIVE connection
+
+The installed LiveF1 1.3 SDK uses `login(...).header` for SignalR and can renew a
+rejected token. The old archive helper used only `auth_header()`, which silently
+returns empty when the shared token is expired/missing, and never renewed it.
+An established LIVE socket can continue while a new REST request lacks a usable
+token. Both paths use the same SDK cache/configuration; the archive did not have
+an intentionally separate account. Its other defect was labelling **all** 403s
+as authentication-required, including denials with an Authorization header.
+The supplied old diagnostics therefore cannot establish whether it was a 401,
+missing Bearer, or an authorized 403.
+
+`archive_auth.py` now reuses the SDK token, and obtains renewal through public
+`livef1.auth.login` with explicit already-configured local credentials. Pinned SDK
+read-only env-path helpers preserve livef1.configure/env-file precedence; no new
+credential store is introduced. Missing credentials do not trigger background
+prompts. A lock, global refresh cooldown and one request retry bound renewal.
+401 rejection can refresh once; 403 without a token can obtain authentication.
+403 **with** a token is access-denied (as in the SDK REST policy), not proof that
+another sign-in fixes entitlement or a currently unavailable endpoint. It stays
+blocked. No public-data substitution or relaxed identity checks are introduced.
+
+Requests use the LIVE SDK's BestHTTP profile, standard timeouts, and no automatic
+redirect forwarding. Verification diagnostics export only endpoint kind, HTTP
+status, whether auth was attached, refresh attempted/succeeded and safe numeric
+cache/server-clock information. No JWT, password, cookie, account identifier,
+credential filename, raw request/response header or body is exported. Renewing a
+REST token does not disconnect/restart the existing LIVE subscription.
+
+The controller's yearly index lookup has no disk/index cache; the season batch's
+24-hour cache is a different path. The reported `feedPathEntries: 0` was already
+before combine_schedule's time filtering, so that filter cannot explain that
+particular missing path. list_sessions only removes records with no Path. New
+`indexRequestDiagnostics` shows raw entry/pathless counts and request timing.
+Index requests ask no-cache revalidation and use a changing query nonce. These
+are requests, not guarantees that a provider/CDN honored them; safe cache Age/
+HIT/MISS indicators help distinguish a stale upstream response. If a newly fetched
+index still lacks the Race while direct metadata works, publication/index lag
+remains the explanation to investigate; do not invent a path or claim it proved.
+
+### Safe Windows probe and validation
+
+After pulling this branch, run this locally from the repository. It reads only
+metadata, creates no subscription, changes no circuit assets and prints sanitized
+JSON. Use the exact path in your feedEvidence:
+
+```powershell
+git fetch origin
+git switch feat/production-live-ui-cleanup
+git pull --ff-only origin feat/production-live-ui-cleanup
+.\.venv\Scripts\python.exe -m bridge.metadata_probe --year 2026 --event "Las Vegas" --path "2026/2026-11-21_Las_Vegas_Grand_Prix/2026-11-21_Race/" --login
+```
+
+If a 401 persists and renewal cannot use stored local credentials, explicitly
+refresh locally (do not paste credentials/tokens into chat):
+
+```powershell
+.\.venv\Scripts\python.exe -c "import livef1; livef1.login(force=True)"
+```
+
+Then restart the backend with `--auto --login`, keep the normal Vite frontend and
+hard-refresh `/wall`. `/dev` may be opened read-only to inspect:
+
+- `indexRequestDiagnostics`: current HTTP result, auth attached, cache requests,
+  server cache hints, raw entry/pathless counts and fetchedAt.
+- `providerIdentityCheck.requestDiagnostics`: whether rejection happened at the
+  per-session index or SessionInfo stream, HTTP status/auth/refresh evidence.
+- HTTP 200 + valid independent identity + fresh actual telemetry must precede
+  reconciliation approval and LIVE/view live. A 200 alone is not approval.
+- `archive-access-denied` / 403 with auth means the provider still denied that
+  endpoint. Keep AUTO waiting; do not repeat login indefinitely or weaken checks.
+  The real cause may be entitlement, endpoint policy or unpublished resources;
+  this code cannot distinguish those from status alone.
+
+Tests simulate expired/missing/rejected/shared credentials, successful renewal,
+authorized 403, no-prompt behavior, bounded retries, safe reports, pathless index
+entries and authenticated LIVE + REST denial. Real account authorization and
+provider publication still require this local probe; tests are not LIVE proof.
+
+## Alternative current-session publication (Las Vegas cached index + 403)
+
+### Findings from SDK and provider research
+
+The pinned LiveF1 1.3.0 `get_season`, `get_meeting`, `get_session` and
+`is_livetiming_available` checks ultimately use the same season/session static
+indexes (`adapters/functions.py` fetch_livetiming_season_index and
+fetch_livetiming_session_index). Calling another wrapper does not provide an
+independent fresh origin. The SDK's Jolpica merge can create scheduled entries
+with J-prefixed identifiers; those are not published F1 timing identities and are
+not accepted by our numeric-key verification. No public current-session helper
+or CDN purge/fresh-origin API was found in the installed SDK. Do not upgrade or
+swap providers to work around the denial.
+
+A separate known provider publication is the root current-session keyframe:
+`https://livetiming.formula1.com/static/SessionInfo.json`. It is not the denied
+Race-directory Index endpoint. Primary upstream evidence is the FastF1 project
+issue #53, which describes this exact official-host document and its own Path:
+https://github.com/theOehrly/Fast-F1/issues/53 . The SDK documents keyframe metadata
+semantics and the usual static archive tree:
+https://livef1.goktugocal.com/livetimingf1/f1_data.html . This is not a new guaranteed
+LiveF1 API contract; 2026 authenticated availability must be tested locally.
+
+The supplied authenticated HIT with Age ~2160 proves that the requested
+revalidation/query did not yield a demonstrably fresh response in that run. No
+client-side operation here can force the provider CDN to purge or guarantee that
+an origin response is current. Local filtering only explains the single pathless
+entry; it does not make the missing Race path appear. Do not change hostnames,
+strip authentication, guess an origin URL, or substitute a schedule as evidence.
+
+### Safe alternative
+
+When the per-session archive is unavailable (401/403/404), verification may make
+one bounded GET of the fixed root keyframe with the **same** SDK authentication,
+request profile, timeout and redirect policy. Cache revalidation is requested and
+cache age/HIT diagnostics are retained. Authorization denials are never ignored.
+No alternate host, inferred session path or additional LIVE connection is used.
+
+The root document MUST contain its own explicit canonical Path. It is never
+filled in from the observed/selected feed. Its session/meeting/circuit keys,
+name/type, year, local date, timezone/start, event and path must agree with the
+actual feed and advisory, while the feed still supplies fresh real telemetry.
+A prior Qualifying keyframe, missing fields, old year/date, conflict, TEST/MANUAL,
+completed session, or denied root endpoint keeps AUTO blocked. HTTP 200 and
+identityConfirmed alone remain insufficient. If the root later advances from
+Qualifying to Race, cached disagreement is rechecked at bounded intervals.
+
+Successful approval reports `reconciliation.source: current-session-keyframe`.
+`providerIdentityCheck.publishedPath` shows the provider's actual returned path,
+which may differ from the requested Race path. Geometry verification status is
+unchanged. This keyframe is an independent HTTP publication, not another copy of
+our locally confirmed SignalR identity flag.
+
+### Local verification
+
+Pull the same branch, then use the existing sanitized probe:
+
+```powershell
+git fetch origin
+git switch feat/production-live-ui-cleanup
+git pull --ff-only origin feat/production-live-ui-cleanup
+.\.venv\Scripts\python.exe -m bridge.metadata_probe --year 2026 --event "Las Vegas" --path "2026/2026-11-21_Las_Vegas_Grand_Prix/2026-11-21_Race/" --login
+```
+
+It now includes a `current-session-info` request after archive denial. Inspect:
+
+- The actual HTTP results and cache age for each distinct endpoint.
+- `metadata.source: current-session-keyframe` if that resource was retrieved.
+- `metadata.matchesRequestedPath`: false means no matching Race publication was
+  obtained, even if the HTTP response was 200. Probe exit success is metadata
+  retrieval/path/identity-field agreement, NOT LIVE approval without real telemetry.
+
+Restart the backend with `--auto --login`, run `npm run dev` in another terminal,
+and hard-refresh `/wall`. Do not press Start LIVE to force AUTO. Only successful
+strict reconciliation plus real activity may yield LIVE/view live. If the root
+is denied or disagrees, keep AUTO waiting; manual LIVE remains a separate explicit
+operator workflow and is not upgraded to autonomous proof.
+
+Regression fixtures reproduce 111 raw entries/one missing Path, four Vegas
+practice/qualifying paths, authenticated cache HIT with Age 2160, and Race-index
+403. A permitted matching root keyframe can verify; denied/stale/wrong/missing
+root metadata cannot. No actual authenticated LIVE or root success is claimed by
+these fixture tests. A web retrieval of the root was denied, but the actual Python probe subsequently
+retrieved it successfully (HTTP 200, cache HIT/Age 31 seconds) with the exact
+2026 Vegas Race path, session 11420, meeting 1300 and circuit 152. No token was
+available in that environment; the official root resource itself permitted the
+request. Authentication was not stripped or bypassed. This proves independent
+metadata retrieval, not authenticated LIVE telemetry or wall switching. The
+local probe still needs to establish access/identity agreement for the user.

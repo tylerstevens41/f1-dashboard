@@ -205,3 +205,100 @@ class MetadataPersistenceTests(IsolatedAsyncioTestCase):
             self.assertEqual(restored.sessions[0]['path'],session()['path']);self.assertEqual(restored.last_discovery,BASE)
             self.assertEqual(restored.machine.state,'DASHBOARD');self.assertIsNone(restored.machine.last_live)
             await service.close();await restored.close()
+
+class VegasSwitchingTests(IsolatedAsyncioTestCase):
+    """Invented metadata/control-plane samples, not recorded Vegas telemetry."""
+    def vegas(self):
+        return {'path':'2026/SIMULATION_Las_Vegas/Race/','start':'2026-11-21T20:00:00',
+                'gmtOffset':'-08:00:00','year':2026,'session':'Race','event':'Las Vegas Grand Prix',
+                'location':'Paradise','circuit':{'Key':'SIMULATION','ShortName':'Las Vegas'}}
+
+    async def test_auto_vegas_published_race_promotes_placeholder_and_broadcasts_live(self):
+        from bridge.annotation_progress import atomic
+        s=self.vegas();now=utc_start(s)+120
+        advice={**s,'path':None,'start':'2026-11-22T04:00:00Z','location':'Las Vegas','advisoryId':'fixture:Race'}
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'controller.json'
+            atomic(path,{'schema':'session-controller-v1','mode':'MANUAL'})
+            bridge=Bridge();bridge.broadcast=AsyncMock();bridge.start_live=AsyncMock()
+            bridge.asset_store=SimpleNamespace(lookup=Mock(return_value=None))
+            service=ControllerService(bridge,path,force_mode='AUTO');bridge.autonomy=service
+            self.assertEqual(service.machine.mode,'AUTO')
+            service.sessions=[advice];service.discovery_due=now+1000
+            await service.tick(now-300);self.assertEqual(service.machine.state,'WAITING_FOR_SESSION')
+            bridge.start_live.assert_awaited_once_with(None);bridge.start_live.reset_mock()
+            # Published metadata may arrive without the schedule's advisory ID,
+            # with a different city label, at the UTC/local date boundary.
+            service.sessions=[s]
+            bridge.source_task=SimpleNamespace(done=lambda:False);bridge.live_expected=s
+            bridge.state.topics={'SessionInfo':{**observation(s)['session'],'StartDate':s['start']},
+                                 'SessionStatus':{'Status':'Started'},
+                                 'Position.z':{'1':{'X':100,'Y':200,'_sampleTimeMs':now*1000}}}
+            bridge.state.upstream='connected';bridge.last_live_delta=now
+            await service.tick(now)
+            self.assertEqual(service.machine.state,'LIVE');bridge.start_live.assert_not_awaited()
+            messages=[call.args[0] for call in bridge.broadcast.call_args_list if call.args[0].get('type')=='status']
+            self.assertEqual(messages[-1]['controller']['mode'],'AUTO')
+            self.assertEqual(messages[-1]['controller']['view'],'live')
+            self.assertEqual(bridge.snapshot()['controller']['view'],'live')
+            # Schedule expiry alone cannot end it; real completion is confirmed.
+            bridge.state.topics['SessionStatus']['Status']='Finished'
+            await service.tick(now+5);self.assertNotEqual(service.machine.state,'SESSION_COMPLETED')
+            await service.tick(now+17);self.assertEqual(service.machine.state,'SESSION_COMPLETED')
+            bridge.stop_source=AsyncMock()
+            await service.tick(now+40);self.assertEqual(service.snapshot()['view'],'dashboard')
+            bridge.stop_source.assert_awaited_once()
+            await service.close()
+
+    async def test_manual_live_wall_projection_is_shared_but_never_test_or_unconfirmed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            bridge=Bridge();service=ControllerService(bridge,Path(temp)/'controller.json',force_mode='MANUAL');bridge.autonomy=service
+            self.assertEqual(service.snapshot()['manualPresentation'],'dashboard')
+            bridge.state.topics={'SessionInfo':observation(self.vegas())['session'],'SessionStatus':{'Status':'Started'}}
+            self.assertEqual(service.snapshot()['manualPresentation'],'live')
+            bridge.live_confirmed=False;self.assertEqual(service.snapshot()['manualPresentation'],'dashboard')
+            bridge.live_confirmed=True;bridge.state.topics['SessionStatus']['Status']='Finished'
+            self.assertEqual(service.snapshot()['manualPresentation'],'dashboard')
+            bridge.state.topics['TrackStatus']={'Status':'5'}
+            self.assertEqual(service.snapshot()['manualPresentation'],'live')
+            bridge.state.topics['SessionStatus']['Status']='Finalised'
+            self.assertEqual(service.snapshot()['manualPresentation'],'dashboard')
+            bridge.state.reset('TEST');bridge.state.topics={'SessionInfo':observation(self.vegas())['session']}
+            self.assertEqual(service.snapshot()['manualPresentation'],'dashboard')
+            self.assertEqual(service.machine.mode,'MANUAL')
+            await service.close()
+
+    async def test_wrong_feed_and_clock_alone_do_not_promote_auto(self):
+        s=self.vegas();now=utc_start(s)+120
+        c=SessionController();c.tick(now,[s],{})
+        c.tick(now+1,[s],observation({**s,'path':'SIMULATION/OTHER'}))
+        self.assertEqual(c.snapshot()['view'],'dashboard')
+        c.tick(now+2,[s],observation(s,status='Inactive',freshGps=False))
+        self.assertEqual(c.snapshot()['view'],'dashboard')
+        c.tick(now+3,[s],observation(s));self.assertEqual(c.snapshot()['view'],'live')
+
+    async def test_advisory_matching_is_unique_and_cannot_use_another_event(self):
+        s=self.vegas();now=utc_start(s)
+        advice={**s,'path':None,'advisoryId':'sim','location':'Las Vegas'}
+        self.assertEqual(combine_schedule([s],[advice])[0]['advisoryId'],'sim')
+        cold=SessionController();cold.tick(now,[advice],{})
+        self.assertEqual(cold.tick(now+1,[s],{}),'connect')
+        cold.tick(now+2,[s],observation(s));self.assertEqual(cold.snapshot()['view'],'live')
+        c=SessionController();c.tick(now,[advice],{})
+        other={**s,'path':'2026/SIMULATION_OTHER/Race/','event':'Other Grand Prix','location':'Elsewhere'}
+        c.tick(now+1,[other],{});self.assertIsNone(c.selected['path'])
+        duplicate={**s,'path':'2026/SIMULATION_DUPLICATE/Race/'}
+        c.tick(now+2,[s,duplicate],{});self.assertIsNone(c.selected['path'])
+
+class ControlSnapshotTests(IsolatedAsyncioTestCase):
+    async def test_internal_session_reset_snapshot_preserves_controller_without_changing_gps_clock(self):
+        with tempfile.TemporaryDirectory() as temp:
+            bridge=Bridge();bridge.broadcast=AsyncMock()
+            service=ControllerService(bridge,Path(temp)/'controller.json');bridge.autonomy=service
+            await bridge.emit('SessionInfo',{'Key':1,'Path':'SIMULATION/FIRST/'},clock_ms=1234)
+            await bridge.emit('SessionInfo',{'Key':2,'Path':'SIMULATION/SECOND/'},clock_ms=2345)
+            snapshots=[call.args[0] for call in bridge.broadcast.call_args_list if call.args[0]['type']=='snapshot']
+            self.assertTrue(snapshots);self.assertIn('controller',snapshots[-1])
+            topic=bridge.broadcast.call_args_list[-1].args[0]
+            self.assertEqual(topic['clockMs'],2345)
+            await service.close()

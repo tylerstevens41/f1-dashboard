@@ -51,10 +51,12 @@ class SessionController:
         self.completed=list(saved.get('completed',[]))[-100:]
         self.history=list(saved.get('history',[]))[-100:];self.reason='startup; live identity requires revalidation'
         self.changed_at=0;self.last_live=None;self.completion_since=None;self.completion_observations=0
+        self.reconciliation={'status':'not-attempted'}
         self.presenting=False;self.last_attempt_at=0;self.retry_at=0;self.attempts=0;self.total_attempts=0;self.circuit='not-resolved'
 
     def set_mode(self,mode,now):
         if mode not in ('AUTO','MANUAL'):raise ValueError('Invalid controller mode')
+        self.reconciliation={'status':'not-attempted'}
         self.mode=mode;self.selected=None;self.last_live=None;self.presenting=False;self.completion_since=None
         self.retry_at=0;self.attempts=0
         self.transition('DASHBOARD','explicit '+mode+' selection',now)
@@ -71,9 +73,21 @@ class SessionController:
         return {'mode':self.mode,'state':self.state,'view':'live' if self.state in LIVE_STATES and self.presenting else 'dashboard',
                 'selected':self.selected,'upcoming':self.upcoming,'reason':self.reason,'changedAt':self.changed_at,
                 'lastTelemetryAt':self.last_live,'retryAt':self.retry_at,'retryAttempts':self.total_attempts,
-                'circuit':self.circuit,'history':self.history[-20:]}
+                'circuit':self.circuit,'reconciliation':self.reconciliation,'history':self.history[-20:]}
 
     def checkpoint(self):return {'schema':'session-controller-v1','mode':self.mode,'completed':self.completed[-100:],'history':self.history[-100:]}
+
+    def request_connection(self,now,observe=False):
+        """One bounded retry budget for expected-session and current-feed observation."""
+        self.last_attempt_at=now
+        self.total_attempts+=1;self.attempts+=1
+        delay=min(60,2**min(self.attempts,6))
+        if self.attempts>=8:delay=300;self.attempts=0
+        self.retry_at=now+delay
+        if observe:
+            self.transition('WAITING_FOR_SESSION','observing current provider feed; identity/freshness not yet reconciled',now)
+        else:self.transition('CONNECTING' if not self.presenting else 'RECOVERING','bounded subscription attempt',now)
+        return 'connect'
 
     def tick(self,now,sessions,observation):
         if self.mode!='AUTO':return None
@@ -106,13 +120,24 @@ class SessionController:
             self.selected=(actual or eligible[-1][1]);self.attempts=0;self.retry_at=0
             self.transition('WAITING_FOR_SESSION','monitor window; validate published identity',now)
         selected=self.selected
+        adopted=False
         if not selected.get('path'):
             # Schedule may precede publication. Replace advisory only with an
             # actual matching provider entry on a later discovery poll.
-            replacement=next((s for _,s in eligible if s.get('path') and s.get('advisoryId')==selected.get('advisoryId')),None)
+            replacements=[s for _,s in eligible if s.get('path') and
+                          ((selected.get('advisoryId') and s.get('advisoryId')==selected['advisoryId']) or advisory_matches(s,selected))]
+            replacement=replacements[0] if len(replacements)==1 else None
             if replacement:self.selected=replacement;selected=replacement
             else:
-                self.transition('WAITING_FOR_SESSION','schedule available; provider session not published',now);return None
+                from .live_reconciliation import reconcile
+                candidate,self.reconciliation=reconcile(now,selected,observation,
+                    observation.get('providerIdentity'),observation.get('publishedSessions',()))
+                if candidate and candidate['path'] in self.completed:
+                    candidate=None;self.reconciliation={'status':'blocked','reason':'session-already-completed'}
+                if candidate:
+                    self.selected=selected=candidate;adopted=True
+                else:
+                    self.transition('WAITING_FOR_SESSION','schedule available; provider session not published or independently reconciled',now);return None
         matches=identity_matches(selected,info)
         status=observation.get('status');red=observation.get('trackStatus')=='5'
         fresh=observation.get('freshGps',False) or observation.get('freshDelta',False)
@@ -139,31 +164,31 @@ class SessionController:
         quiet_live=matches and self.presenting and status in ('Started','Resumed') and not red and self.last_live is not None and now-self.last_live>60
         missing_identity=not matches and now>(utc_start(selected) or now)+30
         refresh=observation.get('sourceRunning') and (quiet_live or missing_identity) and now-self.last_attempt_at>=60
-        needs_connection=refresh or not observation.get('sourceRunning') or ('expectedPath' in observation and observation['expectedPath']!=selected['path'])
+        needs_connection=refresh or not observation.get('sourceRunning') or ('expectedPath' in observation and observation['expectedPath']!=selected['path'] and not adopted)
         if needs_connection and now>=self.retry_at:
-            self.last_attempt_at=now
-            self.total_attempts+=1;self.attempts+=1
-            delay=min(60,2**min(self.attempts,6))
-            if self.attempts>=8:delay=300;self.attempts=0
-            self.retry_at=now+delay
-            self.transition('CONNECTING' if not self.presenting else 'RECOVERING','bounded subscription attempt',now)
-            return 'connect'
+            return self.request_connection(now)
         return None
+
+
+def advisory_matches(published,advice):
+    """Link a schedule hint to published metadata; never approve LIVE identity."""
+    def norm(text):return re.sub(r'[^a-z0-9]','',unicodedata.normalize('NFKD',str(text or '')).encode('ascii','ignore').decode().lower())
+    if name(published.get('session'))!=name(advice.get('session')):return False
+    venue=norm(published.get('location'))
+    event=norm(published.get('event'))
+    if not (venue and venue==norm(advice.get('location')) or event and event==norm(advice.get('event'))):return False
+    a,b=utc_start(published),utc_start(advice)
+    if a is not None and b is not None:return abs(a-b)<=43200
+    try:return abs((datetime.fromisoformat(str(published.get('start'))[:10])-datetime.fromisoformat(str(advice.get('start'))[:10])).days)<=1
+    except ValueError:return False
 
 
 def combine_schedule(published,advisories):
     """Advisory timestamps may schedule monitoring, never invent provider paths."""
-    def norm(text):return re.sub(r'[^a-z0-9]','',unicodedata.normalize('NFKD',str(text)).encode('ascii','ignore').decode().lower())
     published=list({s['path']:s for s in published if isinstance(s,dict) and s.get('path')}.values())
-    def same_day(s,advice):
-        a,b=utc_start(s),utc_start(advice)
-        if a is not None and b is not None:return abs(a-b)<=43200
-        try:return abs((datetime.fromisoformat(str(s.get('start'))[:10])-datetime.fromisoformat(advice['start'][:10])).days)<=1
-        except ValueError:return False
     output=[];used=set()
     for advice in advisories:
-        matches=[s for s in published if name(s.get('session'))==advice['session'] and
-                 norm(s.get('location'))==norm(advice.get('location')) and same_day(s,advice)]
+        matches=[s for s in published if advisory_matches(s,advice)]
         if len(matches)==1:
             s=dict(matches[0]);s['advisoryId']=advice['advisoryId']
             if utc_start(s) is None:

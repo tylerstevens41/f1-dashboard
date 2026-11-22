@@ -24,13 +24,16 @@ def safe_exception(exc, stage):
         winerror=getattr(exc,'winerror',None)
         if winerror in {5,32,33}:result['windowsErrorCode']=winerror
     code = getattr(exc, 'code', None)
-    if code in {'fastf1-telemetry-unavailable','fastf1-authentication-required','authentication-required','topic-unpublished','archive-http-error','download-limit','no-events','record-limit','invalid-clip-schema','invalid-event-schema','invalid-position-record-schema','invalid-stream-format','scan-limit','missing-required-stream','invalid-timing-schema','no-lap-timing-in-bounded-source','no-moving-gps-in-bounded-source'}:
+    if code in {'fastf1-telemetry-unavailable','fastf1-authentication-required','authentication-required','archive-access-denied','invalid-stream-path','topic-unpublished','archive-http-error','download-limit','no-events','record-limit','invalid-clip-schema','invalid-event-schema','invalid-position-record-schema','invalid-stream-format','scan-limit','missing-required-stream','invalid-timing-schema','no-lap-timing-in-bounded-source','no-moving-gps-in-bounded-source'}:
         result['code'] = code
     if getattr(exc,'formatKind',None) in {'html-or-markup','json-without-elapsed-prefix','quoted-without-elapsed-prefix','unsupported-prefix'}:
         result['formatKind']=exc.formatKind
         result['prefixShape']=exc.prefixShape
     if isinstance(exc, ModuleNotFoundError) and isinstance(exc.name, str) and re.fullmatch(r'[A-Za-z0-9_.]{1,80}', exc.name):
         result['missingModule'] = exc.name
+    status=getattr(exc,'http_status',None)
+    if isinstance(status,int) and 100<=status<=599:result['httpStatus']=status
+    if code=='archive-access-denied':result['hint']='Provider returned HTTP 403 with a Bearer token attached. Access/endpoint/publication policy is unresolved; another sign-in is not proof of entitlement. Inspect request diagnostics; do not share headers or bodies.'
     response = getattr(exc, 'response', None)
     status = getattr(response, 'status_code', None)
     if isinstance(status, int) and 100 <= status <= 599:

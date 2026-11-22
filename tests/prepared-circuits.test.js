@@ -101,3 +101,10 @@ test('FastF1 phase diagnostics show timestamp, stalled phase and partial annotat
   assert.match(html,/aligned corners 17/);assert.match(html,/Failed phase: multi-lap-collection/);
  }finally{await server.close();}
 });
+
+test('same-season practice/qualifying assets resolve for race by circuit identity, never a guessed path',()=>{
+ const b=fixture();b.identity.path='2026/fixture/Qualifying/';b.identity.session='Qualifying';
+ const race={...session,Name:'Race',Path:'2026/fixture/Race/'};
+ assert.equal(preparedForSession({fixture:b},race),b);
+ assert.equal(preparedForSession({fixture:b},{...race,StartDate:'2027-01-01'}),null);
+});

@@ -1,3 +1,6 @@
+import {intervalToAhead} from "./race/timingPresentation";
+import TyreIcon from "./race/TyreIcon";
+import {liveTrackingStatus} from "./race/liveStatus";
 import LiveControls from "./race/LiveControls";
 import PreparationPanel from './circuits/PreparationPanel';
 import {sessionCircuitKey,sessionYear,preparedForSession,preparedCircuit} from './circuits/prepared';
@@ -195,80 +198,9 @@ function getTyreAge(data) {
   ]);
 }
 
-function getTyreCode(compound) {
-  const codes = {
-    SOFT: "S",
-    MEDIUM: "M",
-    HARD: "H",
-    INTERMEDIATE: "I",
-    WET: "W",
-  };
-
-  return codes[compound] ?? "";
-}
-
 function TyreDisplay({ data }) {
-  const compound = getCompound(data);
-  const code = getTyreCode(compound);
   const age = getTyreAge(data);
-
-  if (!code) {
-    return (
-      <span style={{ color: "#7d8492" }}>
-        —
-      </span>
-    );
-  }
-
-  const colors = {
-    S: "#e10600",
-    M: "#ffd400",
-    H: "#f4f4f4",
-    I: "#27b86b",
-    W: "#3295f0",
-  };
-
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 5,
-      }}
-      title={`${compound}${
-        age != null ? ` · ${age} laps` : ""
-      }`}
-    >
-      <span
-        style={{
-          width: 18,
-          height: 18,
-          borderRadius: "50%",
-          border: `3px solid ${colors[code]}`,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 9,
-          fontWeight: 800,
-          color: "#fff",
-          boxSizing: "border-box",
-        }}
-      >
-        {code}
-      </span>
-
-      {age != null && (
-        <span
-          style={{
-            fontSize: 10,
-            color: "#c6cad3",
-          }}
-        >
-          {age}L
-        </span>
-      )}
-    </span>
-  );
+  return <span className="live-tyre-display"><TyreIcon compound={getCompound(data)}/>{age != null && <span className="live-tyre-age">{age}L</span>}</span>;
 }
 
 // ============================================
@@ -333,7 +265,7 @@ function getSessionType(session) {
 // MAIN COMPONENT
 // ============================================
 
-function SessionContent({feed,wall=false}) {
+function SessionContent({feed,developer=false}) {
   const { race, connection } = feed;
   const session = race.topics.SessionInfo ?? EMPTY;
   const driversByNumber = race.topics.DriverList ?? EMPTY;
@@ -444,9 +376,9 @@ function SessionContent({feed,wall=false}) {
         minHeight: 0,
       }}
     >
-      {!wall && <LiveControls feed={feed}/>}
-      {!wall && <RaceDevTools feed={feed} circuit={circuitName} />}
-      <div style={{ padding: "0 16px", color: race.mode === "TEST" ? "#ffd43b" : "#40d98a" }}>{race.mode === "TEST" ? "TEST · historical LiveF1 data" : "LIVE"} · {race.upstream}{race.mode === 'TEST' && ` · ${race.playback} · ${playbackClock(race.playbackInfo?.offsetMs)} / ${playbackClock(race.playbackInfo?.durationMs)}`}</div>
+      {developer && <LiveControls feed={feed}/>}
+      {developer && <RaceDevTools feed={feed} circuit={circuitName} />}
+      {developer && <div style={{ padding: "0 16px", color: race.mode === "TEST" ? "#ffd43b" : "#40d98a" }}>{race.mode === "TEST" ? "TEST · historical LiveF1 data" : "LIVE"} · {race.upstream}{race.mode === 'TEST' && ` · ${race.playback} · ${playbackClock(race.playbackInfo?.offsetMs)} / ${playbackClock(race.playbackInfo?.durationMs)}`}</div>}
       {/* SESSION HEADER */}
       <div
         style={{
@@ -489,7 +421,7 @@ function SessionContent({feed,wall=false}) {
                 : "#ffbf47",
           }}
         >
-          ● {connection.toUpperCase()}
+          {race.mode==='TEST' ? 'Historical session' : liveTrackingStatus(race,connection,feed.clockMs)}
         </span>
       </div>
 
@@ -543,15 +475,17 @@ function SessionContent({feed,wall=false}) {
             }}
           >
             <table
+              className="live-timing-table"
               style={{
                 width: "100%",
                 borderCollapse: "collapse",
                 color: "#ffffff",
                 fontSize: 11,
                 whiteSpace: "nowrap",
-                tableLayout: "auto",
+                tableLayout: "fixed",
               }}
             >
+              <colgroup>{[5,18,11,17,11,19,19].map((width,index)=><col key={index} style={{width:`${width}%`}}/>)}</colgroup>
               <thead>
                 <tr
                   style={{
@@ -566,13 +500,16 @@ function SessionContent({feed,wall=false}) {
                     "DRIVER",
                     "GAP",
                     "TYRE",
+                    "INT",
                     "BEST LAP",
                     "LAST LAP",
                   ].map((heading) => (
                     <th
                       key={heading}
+                      scope="col"
+                      title={heading === "INT" ? "Interval to the car ahead" : undefined}
                       style={{
-                        padding: "0 6px",
+                        padding: "0 2px",
                         height: columnHeaderHeight,
                         borderBottom:
                           "1px solid #292d35",
@@ -625,14 +562,14 @@ function SessionContent({feed,wall=false}) {
                   return (
                     <tr
                       key={driver.driver_number}
-                      onClick={() =>
+                      onClick={developer ? () =>
                         setSelectedDriver(
                           driver.driver_number
-                        )
+                        ) : undefined
                       }
                       style={{
                         height: rowHeight,
-                        cursor: "pointer",
+                        cursor: developer ? "pointer" : "default",
                         background: isSelected
                           ? "#252b36"
                           : "transparent",
@@ -643,7 +580,7 @@ function SessionContent({feed,wall=false}) {
                       {/* POSITION */}
                       <td
                         style={{
-                          padding: "0 6px",
+                          padding: "0 2px",
                           height: rowHeight,
                         }}
                       >
@@ -655,7 +592,7 @@ function SessionContent({feed,wall=false}) {
                       {/* DRIVER + TEAM LOGO */}
                       <td
                         style={{
-                          padding: "0 6px",
+                          padding: "0 2px",
                           height: rowHeight,
                         }}
                       >
@@ -700,7 +637,7 @@ function SessionContent({feed,wall=false}) {
                       {/* GAP / PIT / OUT */}
                       <td
                         style={{
-                          padding: "0 6px",
+                          padding: "0 2px",
                           height: rowHeight,
                         }}
                       >
@@ -723,17 +660,20 @@ function SessionContent({feed,wall=false}) {
                       {/* TYRE */}
                       <td
                         style={{
-                          padding: "0 6px",
+                          padding: "0 2px",
                           height: rowHeight,
                         }}
                       >
                         <TyreDisplay data={tyre} />
                       </td>
 
+                      {/* Authoritative interval to the car ahead, separate from leader GAP. */}
+                      <td style={{padding: "0 2px", height: rowHeight}}>{intervalToAhead(timing,driver.position)}</td>
+
                       {/* BEST LAP */}
                       <td
                         style={{
-                          padding: "0 6px",
+                          padding: "0 2px",
                           height: rowHeight,
                         }}
                       >
@@ -743,7 +683,7 @@ function SessionContent({feed,wall=false}) {
                       {/* LAST LAP */}
                       <td
                         style={{
-                          padding: "0 6px",
+                          padding: "0 2px",
                           height: rowHeight,
                         }}
                       >
@@ -779,7 +719,7 @@ function SessionContent({feed,wall=false}) {
         >
           {circuitName ? <LiveCircuitSvg
             key={`${race.generation}-${circuitName}`}
-            readOnly={wall}
+            readOnly={!developer}
             animation={feed.animation}
             mode={race.mode}
             circuitName={circuitName}
@@ -788,8 +728,8 @@ function SessionContent({feed,wall=false}) {
             clockMs={feed.clockMs}
             drivers={gpsDrivers}
             selectedDriver={selectedDriver}
-            onSelectDriver={wall?undefined:setSelectedDriver}
-          /> : <><p>No prepared circuit for this session. Timing remains available.</p>{!wall && import.meta.env.DEV && <PreparationPanel job={activeCircuitJob} disabled={!activeCircuitJob?.identity} onPrepare={()=>feed.send({action:'circuit-prepare',year:sessionYear(session),path:activeCircuitJob?.identity?.path})}/>}</>}
+            onSelectDriver={developer?setSelectedDriver:undefined}
+          /> : <><p>No prepared circuit for this session. Timing remains available.</p>{developer && <PreparationPanel job={activeCircuitJob} disabled={!activeCircuitJob?.identity} onPrepare={()=>feed.send({action:'circuit-prepare',year:sessionYear(session),path:activeCircuitJob?.identity?.path})}/>}</>}
         </section>
       </div>
 
@@ -802,10 +742,9 @@ function SessionContent({feed,wall=false}) {
           fontSize: 10,
         }}
       >
-        {drivers.length} drivers loaded ·{" "}
-        {gpsDrivers.length} drivers with GPS data
+        {developer && <>{drivers.length} drivers loaded · {gpsDrivers.length} drivers with GPS data</>}
 
-        {race.clockMs && ` · ${race.mode} · ${race.clockBasis === "relative" ? `${(race.clockMs / 1000).toFixed(1)}s (relative archive clock)` : new Date(race.clockMs).toLocaleTimeString()}`}
+        {developer && race.clockMs && ` · ${race.mode} · ${race.clockBasis === "relative" ? `${(race.clockMs / 1000).toFixed(1)}s (relative archive clock)` : new Date(race.clockMs).toLocaleTimeString()}`}
         <p>{race.topics.TrackStatus?.Message ?? "Track status unavailable"} · {race.topics.SessionStatus?.Status ?? "Session status unavailable"}</p>
         {Object.values(race.topics.RaceControlMessages?.Messages ?? {}).slice(-3).map((message, index) => <p key={index}>{message.Message}</p>)}
       </div>
@@ -813,5 +752,5 @@ function SessionContent({feed,wall=false}) {
   );
 }
 
-function StandaloneSession({wall}){const feed=useRaceFeed();return <SessionContent feed={feed} wall={wall}/>;}
-export default function LiveSession({feed,wall=false}){return feed?<SessionContent feed={feed} wall={wall}/>:<StandaloneSession wall={wall}/>;}
+function StandaloneSession({wall,developer}){const feed=useRaceFeed();return <SessionContent feed={feed} wall={wall} developer={developer && !wall}/>;}
+export default function LiveSession({feed,wall=false,developer=false}){return feed?<SessionContent feed={feed} wall={wall} developer={developer && !wall}/>:<StandaloneSession wall={wall} developer={developer}/>;}

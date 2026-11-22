@@ -1,5 +1,8 @@
 """Bounded LiveF1 static archive clips; no OpenF1 and no full-season download."""
 import gzip
+from contextlib import contextmanager
+from contextvars import ContextVar
+from email.utils import parsedate_to_datetime
 import hashlib
 import json
 import math
@@ -66,18 +69,66 @@ def safe_url(path):
     return url
 
 
+_REQUEST_DIAGNOSTICS=ContextVar('archive_request_diagnostics',default=None)
+
+
+@contextmanager
+def request_diagnostics(value):
+    token=_REQUEST_DIAGNOSTICS.set(value)
+    try:yield
+    finally:_REQUEST_DIAGNOSTICS.reset(token)
+
+
 def response(path):
-    from livef1.auth import auth_header
-    result = requests.get(safe_url(path), headers=auth_header(), stream=True, timeout=(10, 30))
-    if result.status_code in (401, 403):
+    from .archive_auth import headers
+    url=safe_url(path)
+    leaf=path.rsplit('/',1)[-1]
+    index=leaf=='Index.json'
+    current=path=='SessionInfo.json'
+    revalidate=index or current
+    kind='current-session-info' if current else 'year-index' if re.fullmatch(r'20\d{2}/Index.json',path) else 'session-index' if index else 'session-info' if 'SessionInfo' in leaf else 'archive-topic'
+    auth,renewed=headers()
+    diagnostic={'endpointKind':kind,'sdkSharedAuth':True,'refreshAttempted':renewed,'attempts':[]}
+    observed=_REQUEST_DIAGNOSTICS.get()
+    if observed is not None and len(observed.setdefault('requests',[]))<16:observed['requests'].append(diagnostic)
+    def get(authorization):
+        # Match the working SDK client profile. Revalidate/bust only metadata
+        # indexes/current keyframe; bounded local clip caches retain existing behavior.
+        outgoing={'User-Agent':'BestHTTP',**authorization}
+        if revalidate:outgoing.update({'Cache-Control':'no-cache','Pragma':'no-cache'})
+        result=requests.get(url,headers=outgoing,params={'_f1dash':str(int(time.time())//30)} if revalidate else None,
+                            stream=True,timeout=(10,30),allow_redirects=False)
+        attempt={'httpStatus':result.status_code,'authorizationSent':bool(authorization.get('Authorization')),
+                 'cacheRevalidationRequested':revalidate,'cacheBustRequested':revalidate}
+        age=result.headers.get('Age','')
+        if str(age).isdigit():attempt['cacheAgeSeconds']=min(int(age),604800)
+        cache=str(result.headers.get('X-Cache','')).upper()
+        for known in ('MISS','HIT','BYPASS','EXPIRED'):
+            if known in cache:attempt['cacheHint']=known;break
+        try:attempt['serverDateUtc']=parsedate_to_datetime(result.headers.get('Date','')).timestamp()
+        except (ValueError,TypeError,OverflowError):pass
+        diagnostic['attempts'].append(attempt)
+        return result
+    result=get(auth)
+    # Same rejection policy as LiveF1's REST adapter. A 403 WITH a token is
+    # access denial, not evidence that a second sign-in will grant access.
+    if result.status_code==401 or result.status_code==403 and not auth:
         result.close()
-        raise ArchiveUnavailable('Archive access requires local LiveF1 authentication/entitlement (HTTP 401/403). Run --login locally; never share credentials.', code='authentication-required')
-    if not result.ok:
-        code = result.status_code
-        result.close()
-        if code == 404:
-            raise TopicUnavailable('Archive topic not published (HTTP 404).', code='topic-unpublished')
-        raise ArchiveUnavailable(f'Archive request failed (HTTP {code}).', code='archive-http-error')
+        replacement,attempted=headers(force=True,rejected=auth)
+        diagnostic['refreshAttempted']=diagnostic['refreshAttempted'] or attempted
+        if replacement and replacement!=auth:
+            auth=replacement;result=get(auth)
+        else:
+            error=ArchiveUnavailable('Local LiveF1 authentication required',code='authentication-required')
+            error.http_status=401 if result.status_code==401 else 403
+            raise error
+    if not result.ok or 300<=result.status_code<400:
+        status=result.status_code;result.close()
+        code='authentication-required' if status==401 or status==403 and not auth else 'archive-access-denied' if status==403 else 'topic-unpublished' if status==404 else 'archive-http-error'
+        error=(TopicUnavailable if status==404 else ArchiveUnavailable)('Provider metadata request rejected',code=code)
+        error.http_status=status
+        raise error
+    diagnostic['refreshSucceeded']=bool(diagnostic['refreshAttempted'] and auth)
     return result
 
 
@@ -114,10 +165,15 @@ def list_sessions(year):
     if not 2018 <= int(year) <= 2100:
         raise ValueError('Year must be 2018–2100')
     index = small_json(f'{int(year)}/Index.json')
+    observed=_REQUEST_DIAGNOSTICS.get()
+    if observed is not None:
+        all_sessions=[s for meeting in index.get('Meetings',[]) for s in meeting.get('Sessions',[])]
+        observed.update(localCacheUsed=False,fetchedAt=time.time(),rawSessionEntries=len(all_sessions),
+                        entriesWithoutPath=sum(not s.get('Path') for s in all_sessions))
     return [{'path': session['Path'], 'label': f"{meeting.get('Name', '')} ({meeting.get('Location', '')}) · {session.get('Name', '')}",
              'start': session.get('StartDate'), 'gmtOffset':session.get('GmtOffset'), 'year': int(year), 'session': session.get('Name'),
              'event': meeting.get('Name'), 'location': meeting.get('Location'),
-             'circuit': meeting.get('Circuit', {}), 'meetingKey': meeting.get('Key')}
+             'circuit': meeting.get('Circuit', {}), 'meetingKey': meeting.get('Key'), 'sessionKey':session.get('Key')}
             for meeting in index.get('Meetings', []) for session in meeting.get('Sessions', []) if session.get('Path')]
 
 

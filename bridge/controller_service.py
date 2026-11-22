@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime,timezone
 from pathlib import Path
 import time
+import math
 from .autonomous import SessionController,combine_schedule,schedule_advisories,utc_start
 from .annotation_progress import atomic
 from .diagnostics import safe_exception
@@ -16,7 +17,7 @@ class ControllerService:
             try:
                 from .preparation import read_json
                 saved=read_json(self.path)
-                if saved.get('schema')!='session-controller-v1':saved={}
+                if not isinstance(saved,dict) or saved.get('schema')!='session-controller-v1':saved={}
             except (OSError,ValueError):pass
         self.machine=SessionController(saved)
         if force_mode:self.machine.set_mode(force_mode,time.time())
@@ -25,12 +26,34 @@ class ControllerService:
         self.discovery_due=0;self.last_discovery=saved.get('lastDiscoveryAt');self.discovery_failures=0
         self.discovery_error=None;self.last_checkpoint=None;self.asset_token=None;self.asset_due=0
         self.discovery_task=None
-        self.asset_error=None;self.last_asset_stamp=None
+        self.asset_error=None;self.last_asset_stamp=None;self.last_presentation=None
+        self.index_diagnostics={};self.published=[];self.identity_task=None;self.identity_token=None;self.provider_identity=None
+        self.identity_due=0;self.identity_failures=0;self.identity_check={'state':'not-requested'}
 
     def snapshot(self):
-        return {**self.machine.snapshot(),'lastDiscoveryAt':self.last_discovery,'discoveryRetryAt':self.discovery_due,
+        state=self.bridge.state
+        info=state.topics.get('SessionInfo',{})
+        status=state.topics.get('SessionStatus',{}).get('Status')
+        # A manual LIVE command owns the shared feed. A read-only wall mirrors
+        # that requested session (including waiting/recovery UI), never TEST.
+        # This is a view choice, not an assertion of fresh GPS or active racing.
+        ended=status=='Finalised' or status in ('Finished','Ended','Ends') and str(state.topics.get('TrackStatus',{}).get('Status',''))!='5'
+        manual_live=(self.machine.mode=='MANUAL' and state.mode=='LIVE' and bool(info) and
+                     self.bridge.live_confirmed and not ended)
+        return {**self.machine.snapshot(),'manualPresentation':'live' if manual_live else 'dashboard',
+                'feedEvidence':{'dataMode':state.mode,'identityConfirmed':self.bridge.live_confirmed,
+                                'sessionPath':info.get('Path'),'sessionStatus':status,
+                                'sourceRunning':bool(self.bridge.source_task and not self.bridge.source_task.done())},
+                'lastDiscoveryAt':self.last_discovery,'discoveryRetryAt':self.discovery_due,
                 'circuitIdentity':{'year':self.asset_token[0],'key':self.asset_token[1]} if self.asset_token else None,
-                'discoveryFailures':self.discovery_failures,'discoveryError':self.discovery_error,'assetError':self.asset_error}
+                'discoveryFailures':self.discovery_failures,'discoveryError':self.discovery_error,'assetError':self.asset_error,
+                'providerIdentityCheck':self.identity_check,
+                'indexRequestDiagnostics':self.index_diagnostics,
+                'catalogDiagnostics':{'source':'yearly-archive-index','publishedEntries':len(self.published),
+                    'entriesWithUsableStart':sum(utc_start(s) is not None for s in self.published),
+                    'feedPathEntries':sum(s.get('path')==info.get('Path') for s in self.published),
+                    'feedPathEntriesWithUsableStart':sum(s.get('path')==info.get('Path') and utc_start(s) is not None for s in self.published),
+                    'controllerPathCandidates':sum(bool(s.get('path')) for s in self.sessions)}}
 
     def persist(self):
         value={**self.machine.checkpoint(),'sessions':self.sessions[:256],'lastDiscoveryAt':self.last_discovery}
@@ -40,15 +63,22 @@ class ControllerService:
     def mode(self,mode):
         if mode=='AUTO' and self.bridge.state.mode=='TEST':raise ValueError('TEST retained; switch to LIVE before explicitly enabling AUTO')
         self.machine.set_mode(mode,time.time());self.discovery_due=0
-        if mode=='MANUAL' and self.discovery_task:self.discovery_task.cancel()
+        if mode=='MANUAL':
+            if self.discovery_task:self.discovery_task.cancel()
+            if self.identity_task:self.identity_task.cancel()
         self.persist()
 
     async def discover(self,now):
-        from .archive import list_sessions
+        from .archive import list_sessions,request_diagnostics
         year=datetime.fromtimestamp(now,timezone.utc).year
         try:
             # Independent metadata failures must not remove an already running feed.
-            published=await asyncio.to_thread(list_sessions,year)
+            diagnostics={}
+            self.index_diagnostics=diagnostics
+            def load_catalog():
+                with request_diagnostics(diagnostics):return list_sessions(year)
+            published=await asyncio.to_thread(load_catalog)
+            self.published=published
             self.sessions=combine_schedule(published,[])
             self.last_discovery=now;self.discovery_error=None;self.discovery_failures=0
             try:
@@ -70,24 +100,86 @@ class ControllerService:
         state=self.bridge.state;gps=state.topics.get('Position.z',{})
         fresh=any(isinstance(p,dict) and isinstance(p.get('_sampleTimeMs'),(int,float)) and
                   -2<=(now*1000-p['_sampleTimeMs'])/1000<=7.5 and
-                  isinstance(p.get('X'),(int,float)) and isinstance(p.get('Y'),(int,float)) and
+                  all(isinstance(p.get(k),(int,float)) and not isinstance(p[k],bool) and math.isfinite(p[k]) for k in ('X','Y')) and
                   (p['X']!=0 or p['Y']!=0) for p in gps.values())
         delta=self.bridge.last_live_delta
         return {'session':state.topics.get('SessionInfo',{}),'status':state.topics.get('SessionStatus',{}).get('Status'),
                 'trackStatus':str(state.topics.get('TrackStatus',{}).get('Status','')),'dataMode':state.mode,
+                'identityConfirmed':self.bridge.live_confirmed,
                 'upstream':state.upstream,'expectedPath':(self.bridge.live_expected or {}).get('path'),'sourceRunning':bool(self.bridge.source_task and not self.bridge.source_task.done()),
                 'freshGps':fresh,'freshDelta':delta is not None and 0<=now-delta<=15}
+
+    async def confirm_provider_identity(self,token,now):
+        from .live_reconciliation import published_session_info
+        from .archive import request_diagnostics
+        started=time.monotonic();diagnostics={}
+        def load_identity():
+            with request_diagnostics(diagnostics):return published_session_info(token[0])
+        try:
+            result=await asyncio.to_thread(load_identity)
+            if token==self.identity_token:
+                checked=now+max(0,time.monotonic()-started)
+                self.provider_identity=result;self.identity_failures=0;self.identity_due=checked+60
+                self.identity_check={'state':'received','path':token[0],'publishedPath':result.get('path'),
+                                     'source':result.get('source','session-archive'),'checkedAt':checked,'requestDiagnostics':diagnostics}
+        except asyncio.CancelledError:raise
+        except Exception as exc:
+            if token==self.identity_token:
+                checked=now+max(0,time.monotonic()-started)
+                self.identity_failures+=1;self.identity_due=checked+min(300,30*2**min(self.identity_failures-1,4))
+                self.identity_check={'state':'unavailable','path':token[0],'checkedAt':checked,
+                                     'retryAt':self.identity_due,'error':safe_exception(exc,'archive'),'requestDiagnostics':diagnostics}
+
+    def reconciliation_observation(self,now):
+        from .live_reconciliation import reconcile
+        observation=self.observation(now)
+        observation['publishedSessions']=self.published
+        pending=self.machine.selected
+        if not pending or pending.get('path'):return observation
+        info=observation['session'];meeting=info.get('Meeting',{});circuit=meeting.get('Circuit',{})
+        token=(info.get('Path'),info.get('Key'),meeting.get('Key'),circuit.get('Key'),info.get('StartDate'))
+        if token!=self.identity_token:
+            if self.identity_task:self.identity_task.cancel()
+            self.identity_token=token;self.provider_identity=None;self.identity_due=0;self.identity_failures=0
+            self.identity_check={'state':'not-requested'}
+        observation['providerIdentity']=self.provider_identity
+        _,check=reconcile(now,pending,observation,self.provider_identity,self.published)
+        if check.get('source')=='year-index':self.identity_check={'state':'year-index-confirmed','path':token[0],'checkedAt':now}
+        if (check['status']=='provider-confirmation-required' or check.get('reason','').startswith(('provider-document-','provider-confirmation-'))) and now>=self.identity_due and (self.identity_task is None or self.identity_task.done()):
+            self.identity_check={'state':'checking','path':token[0],'requestedAt':now}
+            self.identity_task=asyncio.create_task(self.confirm_provider_identity(token,now))
+        return observation
 
     async def tick(self,now=None):
         now=time.time() if now is None else now
         if self.machine.mode!='AUTO':return
-        if self.bridge.state.mode=='TEST':self.machine.set_mode('MANUAL',now);self.persist();return
+        if self.bridge.state.mode=='TEST':self.mode('MANUAL');return
         if now>=self.discovery_due and (self.discovery_task is None or self.discovery_task.done()):
             self.discovery_task=asyncio.create_task(self.discover(now))
         async with self.bridge.control_lock:
             if self.machine.mode!='AUTO' or self.bridge.state.mode=='TEST':return
-            action=self.machine.tick(now,self.sessions,self.observation(now))
+            observation=self.reconciliation_observation(now)
+            action=self.machine.tick(now,self.sessions,observation)
+            selected=self.machine.selected or {}
+            if (selected.get('identitySource') in ('live-feed-plus-independent-session-metadata','live-feed-plus-year-index','live-feed-plus-current-session-keyframe') and
+                self.machine.reconciliation.get('status')=='verified-current-provider-session' and
+                self.machine.state in ('LIVE','LIVE_STALE') and observation.get('identityConfirmed') and
+                (observation.get('freshGps') or observation.get('freshDelta')) and
+                observation['session'].get('Path')==selected.get('path')):
+                # Bind the independently verified identity to the existing
+                # source. No stop/start or additional LiveF1 subscription.
+                if self.bridge.live_expected is None:self.bridge.live_expected=selected
+                if not any(s.get('path')==selected['path'] for s in self.sessions):self.sessions.append(dict(selected))
             if action=='connect':await self.bridge.start_live(self.machine.selected)
+            elif (not action and self.machine.selected and not self.machine.selected.get('path') and
+                  not observation.get('sourceRunning') and now>=self.machine.retry_at and
+                  utc_start(self.machine.selected) is not None and
+                  now-43200<=utc_start(self.machine.selected)<=now+900):
+                # Cold start / restart: a year index can lag the live service.
+                # Observe its one current source without inventing an expected
+                # path; remain Dashboard until independent reconciliation passes.
+                self.machine.request_connection(now,observe=True)
+                await self.bridge.start_live(None)
             elif action=='stop':
                 await self.bridge.stop_source();self.bridge.state.reset('LIVE');self.bridge.error=None
                 self.bridge.state.upstream='idle';await self.bridge.broadcast(self.bridge.snapshot())
@@ -109,6 +201,14 @@ class ControllerService:
                         await self.bridge.broadcast({'version':1,'type':'circuit-assets','bundle':asset})
                 except Exception as exc:self.asset_error=safe_exception(exc,'cache');self.machine.circuit='asset-error'
             self.persist()
+            presentation=self.machine.snapshot()
+            marker=(presentation['mode'],presentation['state'],presentation['view'],presentation['reason'],
+                    (presentation['selected'] or {}).get('path'),presentation['circuit'])
+            if marker!=self.last_presentation:
+                self.last_presentation=marker
+                # Publish transitions explicitly on the existing control channel;
+                # heartbeat also carries this snapshot for reconnect/refresh.
+                await self.bridge.broadcast(self.bridge.transport_message('status',error=self.bridge.error))
 
     async def run(self):
         while True:
@@ -120,6 +220,6 @@ class ControllerService:
             await asyncio.sleep(2)
 
     async def close(self):
-        if self.discovery_task:
-            self.discovery_task.cancel()
-            await asyncio.gather(self.discovery_task,return_exceptions=True)
+        tasks=[task for task in (self.discovery_task,self.identity_task) if task]
+        for task in tasks:task.cancel()
+        if tasks:await asyncio.gather(*tasks,return_exceptions=True)

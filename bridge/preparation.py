@@ -525,7 +525,7 @@ def import_annotations(meta, calibration, root, report, runner=None, process_fac
         return partial.get('corners'),partial.get('sectors'),partial.get('warnings',[])+extra
 
 
-def prepare(session, store=None, report=lambda **_: None, retry=True, windows=(5400, 6000, 3600), collector=collect_geometry, importer=import_annotations, annotations_only=False):
+def prepare(session, store=None, report=lambda **_: None, retry=True, windows=(5400, 6000, 3600), collector=collect_geometry, importer=import_annotations, annotations_only=False, geometry_only=False):
     from .corner_import import geometry_id
     store = store or AssetStore()
     meta = identity(session)
@@ -541,9 +541,10 @@ def prepare(session, store=None, report=lambda **_: None, retry=True, windows=(5
             value.update(cornersReady=bool(bundle.get('corners')),sectorsReady=bool(bundle.get('sectors')),complete=bundle['complete'])
         record = store.progress(meta, **value)
         report(**record)
+    if annotations_only and geometry_only:raise PreparationError('Choose annotations-only or geometry-only, not both')
     existing = store.get(meta)
     if annotations_only and existing is None:raise PreparationError('Annotations-only requires existing accepted geometry; no GPS collection was attempted')
-    if existing and (not retry or existing.get('complete')):
+    if existing and (geometry_only or not retry or existing.get('complete')):
         progress(stage='ready', state='ready', cached=True, complete=existing['complete'])
         return existing
     lock = store.acquire(meta)
@@ -557,6 +558,9 @@ def prepare(session, store=None, report=lambda **_: None, retry=True, windows=(5
         # Publish usable geometry before the optional offline annotations finish.
         store.publish(bundle)
         progress(stage='geometry', state='geometry-ready', complete=False,geometryReused=bool(existing))
+        if geometry_only:
+            progress(stage='ready',state='ready',complete=bundle['complete'],annotationsDeferred=True)
+            return bundle
         corners, sectors, warnings = importer(meta, calibration, store.root, progress)
         if corners is not None and bundle.get('corners') is None:
             bundle['corners'] = corners

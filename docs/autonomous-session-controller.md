@@ -383,3 +383,82 @@ work after pulling/restarting, when there is no pre-existing feed to adopt. Fail
 observers share the existing bounded connection retry/cooldown budget; a running
 observer is not duplicated. An unrelated, ended or incomplete provider session
 remains unapproved. No manual Start LIVE step is required for this bootstrap.
+
+## Metadata authentication versus the working LIVE connection
+
+The installed LiveF1 1.3 SDK uses `login(...).header` for SignalR and can renew a
+rejected token. The old archive helper used only `auth_header()`, which silently
+returns empty when the shared token is expired/missing, and never renewed it.
+An established LIVE socket can continue while a new REST request lacks a usable
+token. Both paths use the same SDK cache/configuration; the archive did not have
+an intentionally separate account. Its other defect was labelling **all** 403s
+as authentication-required, including denials with an Authorization header.
+The supplied old diagnostics therefore cannot establish whether it was a 401,
+missing Bearer, or an authorized 403.
+
+`archive_auth.py` now reuses the SDK token, and obtains renewal through public
+`livef1.auth.login` with explicit already-configured local credentials. Pinned SDK
+read-only env-path helpers preserve livef1.configure/env-file precedence; no new
+credential store is introduced. Missing credentials do not trigger background
+prompts. A lock, global refresh cooldown and one request retry bound renewal.
+401 rejection can refresh once; 403 without a token can obtain authentication.
+403 **with** a token is access-denied (as in the SDK REST policy), not proof that
+another sign-in fixes entitlement or a currently unavailable endpoint. It stays
+blocked. No public-data substitution or relaxed identity checks are introduced.
+
+Requests use the LIVE SDK's BestHTTP profile, standard timeouts, and no automatic
+redirect forwarding. Verification diagnostics export only endpoint kind, HTTP
+status, whether auth was attached, refresh attempted/succeeded and safe numeric
+cache/server-clock information. No JWT, password, cookie, account identifier,
+credential filename, raw request/response header or body is exported. Renewing a
+REST token does not disconnect/restart the existing LIVE subscription.
+
+The controller's yearly index lookup has no disk/index cache; the season batch's
+24-hour cache is a different path. The reported `feedPathEntries: 0` was already
+before combine_schedule's time filtering, so that filter cannot explain that
+particular missing path. list_sessions only removes records with no Path. New
+`indexRequestDiagnostics` shows raw entry/pathless counts and request timing.
+Index requests ask no-cache revalidation and use a changing query nonce. These
+are requests, not guarantees that a provider/CDN honored them; safe cache Age/
+HIT/MISS indicators help distinguish a stale upstream response. If a newly fetched
+index still lacks the Race while direct metadata works, publication/index lag
+remains the explanation to investigate; do not invent a path or claim it proved.
+
+### Safe Windows probe and validation
+
+After pulling this branch, run this locally from the repository. It reads only
+metadata, creates no subscription, changes no circuit assets and prints sanitized
+JSON. Use the exact path in your feedEvidence:
+
+```powershell
+git fetch origin
+git switch feat/production-live-ui-cleanup
+git pull --ff-only origin feat/production-live-ui-cleanup
+.\.venv\Scripts\python.exe -m bridge.metadata_probe --year 2026 --event "Las Vegas" --path "2026/2026-11-21_Las_Vegas_Grand_Prix/2026-11-21_Race/" --login
+```
+
+If a 401 persists and renewal cannot use stored local credentials, explicitly
+refresh locally (do not paste credentials/tokens into chat):
+
+```powershell
+.\.venv\Scripts\python.exe -c "import livef1; livef1.login(force=True)"
+```
+
+Then restart the backend with `--auto --login`, keep the normal Vite frontend and
+hard-refresh `/wall`. `/dev` may be opened read-only to inspect:
+
+- `indexRequestDiagnostics`: current HTTP result, auth attached, cache requests,
+  server cache hints, raw entry/pathless counts and fetchedAt.
+- `providerIdentityCheck.requestDiagnostics`: whether rejection happened at the
+  per-session index or SessionInfo stream, HTTP status/auth/refresh evidence.
+- HTTP 200 + valid independent identity + fresh actual telemetry must precede
+  reconciliation approval and LIVE/view live. A 200 alone is not approval.
+- `archive-access-denied` / 403 with auth means the provider still denied that
+  endpoint. Keep AUTO waiting; do not repeat login indefinitely or weaken checks.
+  The real cause may be entitlement, endpoint policy or unpublished resources;
+  this code cannot distinguish those from status alone.
+
+Tests simulate expired/missing/rejected/shared credentials, successful renewal,
+authorized 403, no-prompt behavior, bounded retries, safe reports, pathless index
+entries and authenticated LIVE + REST denial. Real account authorization and
+provider publication still require this local probe; tests are not LIVE proof.

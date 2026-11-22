@@ -27,7 +27,7 @@ class ControllerService:
         self.discovery_error=None;self.last_checkpoint=None;self.asset_token=None;self.asset_due=0
         self.discovery_task=None
         self.asset_error=None;self.last_asset_stamp=None;self.last_presentation=None
-        self.published=[];self.identity_task=None;self.identity_token=None;self.provider_identity=None
+        self.index_diagnostics={};self.published=[];self.identity_task=None;self.identity_token=None;self.provider_identity=None
         self.identity_due=0;self.identity_failures=0;self.identity_check={'state':'not-requested'}
 
     def snapshot(self):
@@ -48,6 +48,7 @@ class ControllerService:
                 'circuitIdentity':{'year':self.asset_token[0],'key':self.asset_token[1]} if self.asset_token else None,
                 'discoveryFailures':self.discovery_failures,'discoveryError':self.discovery_error,'assetError':self.asset_error,
                 'providerIdentityCheck':self.identity_check,
+                'indexRequestDiagnostics':self.index_diagnostics,
                 'catalogDiagnostics':{'source':'yearly-archive-index','publishedEntries':len(self.published),
                     'entriesWithUsableStart':sum(utc_start(s) is not None for s in self.published),
                     'feedPathEntries':sum(s.get('path')==info.get('Path') for s in self.published),
@@ -68,11 +69,15 @@ class ControllerService:
         self.persist()
 
     async def discover(self,now):
-        from .archive import list_sessions
+        from .archive import list_sessions,request_diagnostics
         year=datetime.fromtimestamp(now,timezone.utc).year
         try:
             # Independent metadata failures must not remove an already running feed.
-            published=await asyncio.to_thread(list_sessions,year)
+            diagnostics={}
+            self.index_diagnostics=diagnostics
+            def load_catalog():
+                with request_diagnostics(diagnostics):return list_sessions(year)
+            published=await asyncio.to_thread(load_catalog)
             self.published=published
             self.sessions=combine_schedule(published,[])
             self.last_discovery=now;self.discovery_error=None;self.discovery_failures=0
@@ -106,20 +111,23 @@ class ControllerService:
 
     async def confirm_provider_identity(self,token,now):
         from .live_reconciliation import published_session_info
-        started=time.monotonic()
+        from .archive import request_diagnostics
+        started=time.monotonic();diagnostics={}
+        def load_identity():
+            with request_diagnostics(diagnostics):return published_session_info(token[0])
         try:
-            result=await asyncio.to_thread(published_session_info,token[0])
+            result=await asyncio.to_thread(load_identity)
             if token==self.identity_token:
                 checked=now+max(0,time.monotonic()-started)
                 self.provider_identity=result;self.identity_failures=0;self.identity_due=checked+60
-                self.identity_check={'state':'received','path':token[0],'checkedAt':checked}
+                self.identity_check={'state':'received','path':token[0],'checkedAt':checked,'requestDiagnostics':diagnostics}
         except asyncio.CancelledError:raise
         except Exception as exc:
             if token==self.identity_token:
                 checked=now+max(0,time.monotonic()-started)
                 self.identity_failures+=1;self.identity_due=checked+min(300,30*2**min(self.identity_failures-1,4))
                 self.identity_check={'state':'unavailable','path':token[0],'checkedAt':checked,
-                                     'retryAt':self.identity_due,'error':safe_exception(exc,'archive')}
+                                     'retryAt':self.identity_due,'error':safe_exception(exc,'archive'),'requestDiagnostics':diagnostics}
 
     def reconciliation_observation(self,now):
         from .live_reconciliation import reconcile

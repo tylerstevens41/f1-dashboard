@@ -216,3 +216,35 @@ class ReconciliationServiceTests(IsolatedAsyncioTestCase):
             self.assertEqual(service.machine.state,'LIVE');self.assertEqual(service.snapshot()['view'],'live')
             self.assertEqual(bridge.start_live.await_count,1)
             bridge.stop_source.assert_not_awaited();await service.close()
+
+    async def test_authenticated_live_metadata_403_reports_access_denial_without_promotion(self):
+        response=SimpleNamespace(status_code=403,ok=False,headers={},close=Mock())
+        with tempfile.TemporaryDirectory() as temp,patch('bridge.archive_auth.headers',return_value=({'Authorization':'Bearer SYNTHETIC_SECRET'},False)),patch('bridge.archive.requests.get',return_value=response):
+            bridge,service=self.setup_bridge(temp)
+            await service.tick(NOW);await service.identity_task;await service.tick(NOW+1)
+            check=service.snapshot()['providerIdentityCheck']
+            self.assertEqual(check['error']['code'],'archive-access-denied')
+            self.assertEqual(check['error']['httpStatus'],403)
+            self.assertTrue(check['requestDiagnostics']['requests'][0]['attempts'][0]['authorizationSent'])
+            self.assertEqual(service.snapshot()['view'],'dashboard')
+            self.assertNotIn('SYNTHETIC_SECRET',str(service.snapshot()))
+            bridge.start_live.assert_not_awaited();await service.close()
+
+    async def test_authenticated_live_metadata_401_renewal_can_complete_independent_verification(self):
+        class Reply:
+            def __init__(self,status,text=''):
+                self.status_code=status;self.ok=status<400;self.headers={};self.text=text
+            def close(self):pass
+            def __enter__(self):return self
+            def __exit__(self,*_):pass
+            def iter_content(self,*_):yield self.text.encode()
+        replies=[Reply(401),Reply(200,json.dumps({'Feeds':{'SessionInfo':{'StreamPath':'SessionInfo.jsonStream'}}})),
+                 Reply(200,'00:00:00.000'+json.dumps(info()))]
+        auth=[({'Authorization':'Bearer SYNTHETIC_OLD'},False),({'Authorization':'Bearer SYNTHETIC_NEW'},True),({'Authorization':'Bearer SYNTHETIC_NEW'},False)]
+        with tempfile.TemporaryDirectory() as temp,patch('bridge.archive_auth.headers',side_effect=auth),patch('bridge.archive.requests.get',side_effect=replies):
+            bridge,service=self.setup_bridge(temp)
+            await service.tick(NOW);await service.identity_task;await service.tick(NOW+1)
+            self.assertEqual(service.machine.state,'LIVE')
+            self.assertTrue(service.snapshot()['providerIdentityCheck']['requestDiagnostics']['requests'][0]['refreshSucceeded'])
+            self.assertNotIn('SYNTHETIC_',str(service.snapshot()))
+            bridge.start_live.assert_not_awaited();await service.close()

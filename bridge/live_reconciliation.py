@@ -122,10 +122,10 @@ def reconcile(now,advisory,observation,confirmation=None,catalog=()):
         return (-1 if sign=='-' else 1)*(int(h)*3600+int(m)*60+int(sec or 0))
     if current['gmtOffset'] is not None and published['gmtOffset'] is not None and offset_seconds(current['gmtOffset'])!=offset_seconds(published['gmtOffset']):return reject('provider-document-offset-conflict')
     if published['event']!=current['event'] or published['circuit']['ShortName']!=current['circuit']['ShortName']:return reject('provider-document-names-conflict')
-    return verified(current,'independent-session-metadata')
+    return verified(current,'current-session-keyframe' if confirmation.get('source')=='current-session-keyframe' else 'independent-session-metadata')
 
 
-def published_session_info(path):
+def archived_session_info(path):
     """Bounded, authenticated per-session metadata fetch; no telemetry download.
 
     Resolve the real SessionInfo stream from its Index, not a guessed filename.
@@ -138,7 +138,8 @@ def published_session_info(path):
     feed=feeds.get('SessionInfo',{}) if isinstance(feeds,dict) else {}
     stream=feed.get('StreamPath') if isinstance(feed,dict) else None
     target=urljoin(path,stream) if isinstance(stream,str) else ''
-    if not target.startswith(path) or not target.endswith('.jsonStream'):raise ArchiveUnavailable('SessionInfo metadata stream unavailable',code='topic-unpublished')
+    if not stream:raise ArchiveUnavailable('SessionInfo metadata stream unavailable',code='topic-unpublished')
+    if not target.startswith(path) or not target.endswith('.jsonStream'):raise ArchiveUnavailable('Invalid metadata stream path',code='invalid-stream-path')
     value={};budget=[0]
     for index,line in enumerate(lines(target,budget,limit=1024*1024)):
         if index>=128:raise ArchiveUnavailable('SessionInfo record limit',code='record-limit')
@@ -146,3 +147,21 @@ def published_session_info(path):
         if not isinstance(payload,dict):raise ValueError('Invalid SessionInfo metadata')
         value=merge(value,payload)
     return {'path':path,'sessionInfo':value}
+
+
+def published_session_info(path):
+    """Try archive publication, then the distinct official current keyframe.
+
+    The root endpoint is fixed, not built from a guessed session path. Read it
+    with the same authentication/access policy. It must supply its OWN Path;
+    the caller's expected path is never inserted into a current-session payload.
+    Strict reconciliation still rejects stale/different/missing identities.
+    """
+    from .archive import ArchiveUnavailable,small_json
+    try:return archived_session_info(path)
+    except ArchiveUnavailable as exc:
+        if exc.code not in ('archive-access-denied','authentication-required','topic-unpublished'):raise
+    value=small_json('SessionInfo.json')
+    if not isinstance(value,dict) or not isinstance(value.get('Path'),str) or not PATH.fullmatch(value['Path']):
+        raise ValueError('Current provider keyframe has no explicit valid session path')
+    return {'path':value['Path'],'sessionInfo':value,'source':'current-session-keyframe'}

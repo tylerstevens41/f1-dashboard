@@ -120,7 +120,8 @@ class ControllerService:
             if token==self.identity_token:
                 checked=now+max(0,time.monotonic()-started)
                 self.provider_identity=result;self.identity_failures=0;self.identity_due=checked+60
-                self.identity_check={'state':'received','path':token[0],'checkedAt':checked,'requestDiagnostics':diagnostics}
+                self.identity_check={'state':'received','path':token[0],'publishedPath':result.get('path'),
+                                     'source':result.get('source','session-archive'),'checkedAt':checked,'requestDiagnostics':diagnostics}
         except asyncio.CancelledError:raise
         except Exception as exc:
             if token==self.identity_token:
@@ -144,7 +145,7 @@ class ControllerService:
         observation['providerIdentity']=self.provider_identity
         _,check=reconcile(now,pending,observation,self.provider_identity,self.published)
         if check.get('source')=='year-index':self.identity_check={'state':'year-index-confirmed','path':token[0],'checkedAt':now}
-        if (check['status']=='provider-confirmation-required' or check.get('reason','').startswith('provider-document-')) and now>=self.identity_due and (self.identity_task is None or self.identity_task.done()):
+        if (check['status']=='provider-confirmation-required' or check.get('reason','').startswith(('provider-document-','provider-confirmation-'))) and now>=self.identity_due and (self.identity_task is None or self.identity_task.done()):
             self.identity_check={'state':'checking','path':token[0],'requestedAt':now}
             self.identity_task=asyncio.create_task(self.confirm_provider_identity(token,now))
         return observation
@@ -160,7 +161,7 @@ class ControllerService:
             observation=self.reconciliation_observation(now)
             action=self.machine.tick(now,self.sessions,observation)
             selected=self.machine.selected or {}
-            if (selected.get('identitySource') in ('live-feed-plus-independent-session-metadata','live-feed-plus-year-index') and
+            if (selected.get('identitySource') in ('live-feed-plus-independent-session-metadata','live-feed-plus-year-index','live-feed-plus-current-session-keyframe') and
                 self.machine.reconciliation.get('status')=='verified-current-provider-session' and
                 self.machine.state in ('LIVE','LIVE_STALE') and observation.get('identityConfirmed') and
                 (observation.get('freshGps') or observation.get('freshDelta')) and

@@ -462,3 +462,93 @@ Tests simulate expired/missing/rejected/shared credentials, successful renewal,
 authorized 403, no-prompt behavior, bounded retries, safe reports, pathless index
 entries and authenticated LIVE + REST denial. Real account authorization and
 provider publication still require this local probe; tests are not LIVE proof.
+
+## Alternative current-session publication (Las Vegas cached index + 403)
+
+### Findings from SDK and provider research
+
+The pinned LiveF1 1.3.0 `get_season`, `get_meeting`, `get_session` and
+`is_livetiming_available` checks ultimately use the same season/session static
+indexes (`adapters/functions.py` fetch_livetiming_season_index and
+fetch_livetiming_session_index). Calling another wrapper does not provide an
+independent fresh origin. The SDK's Jolpica merge can create scheduled entries
+with J-prefixed identifiers; those are not published F1 timing identities and are
+not accepted by our numeric-key verification. No public current-session helper
+or CDN purge/fresh-origin API was found in the installed SDK. Do not upgrade or
+swap providers to work around the denial.
+
+A separate known provider publication is the root current-session keyframe:
+`https://livetiming.formula1.com/static/SessionInfo.json`. It is not the denied
+Race-directory Index endpoint. Primary upstream evidence is the FastF1 project
+issue #53, which describes this exact official-host document and its own Path:
+https://github.com/theOehrly/Fast-F1/issues/53 . The SDK documents keyframe metadata
+semantics and the usual static archive tree:
+https://livef1.goktugocal.com/livetimingf1/f1_data.html . This is not a new guaranteed
+LiveF1 API contract; 2026 authenticated availability must be tested locally.
+
+The supplied authenticated HIT with Age ~2160 proves that the requested
+revalidation/query did not yield a demonstrably fresh response in that run. No
+client-side operation here can force the provider CDN to purge or guarantee that
+an origin response is current. Local filtering only explains the single pathless
+entry; it does not make the missing Race path appear. Do not change hostnames,
+strip authentication, guess an origin URL, or substitute a schedule as evidence.
+
+### Safe alternative
+
+When the per-session archive is unavailable (401/403/404), verification may make
+one bounded GET of the fixed root keyframe with the **same** SDK authentication,
+request profile, timeout and redirect policy. Cache revalidation is requested and
+cache age/HIT diagnostics are retained. Authorization denials are never ignored.
+No alternate host, inferred session path or additional LIVE connection is used.
+
+The root document MUST contain its own explicit canonical Path. It is never
+filled in from the observed/selected feed. Its session/meeting/circuit keys,
+name/type, year, local date, timezone/start, event and path must agree with the
+actual feed and advisory, while the feed still supplies fresh real telemetry.
+A prior Qualifying keyframe, missing fields, old year/date, conflict, TEST/MANUAL,
+completed session, or denied root endpoint keeps AUTO blocked. HTTP 200 and
+identityConfirmed alone remain insufficient. If the root later advances from
+Qualifying to Race, cached disagreement is rechecked at bounded intervals.
+
+Successful approval reports `reconciliation.source: current-session-keyframe`.
+`providerIdentityCheck.publishedPath` shows the provider's actual returned path,
+which may differ from the requested Race path. Geometry verification status is
+unchanged. This keyframe is an independent HTTP publication, not another copy of
+our locally confirmed SignalR identity flag.
+
+### Local verification
+
+Pull the same branch, then use the existing sanitized probe:
+
+```powershell
+git fetch origin
+git switch feat/production-live-ui-cleanup
+git pull --ff-only origin feat/production-live-ui-cleanup
+.\.venv\Scripts\python.exe -m bridge.metadata_probe --year 2026 --event "Las Vegas" --path "2026/2026-11-21_Las_Vegas_Grand_Prix/2026-11-21_Race/" --login
+```
+
+It now includes a `current-session-info` request after archive denial. Inspect:
+
+- The actual HTTP results and cache age for each distinct endpoint.
+- `metadata.source: current-session-keyframe` if that resource was retrieved.
+- `metadata.matchesRequestedPath`: false means no matching Race publication was
+  obtained, even if the HTTP response was 200. Probe exit success is metadata
+  retrieval/path/identity-field agreement, NOT LIVE approval without real telemetry.
+
+Restart the backend with `--auto --login`, run `npm run dev` in another terminal,
+and hard-refresh `/wall`. Do not press Start LIVE to force AUTO. Only successful
+strict reconciliation plus real activity may yield LIVE/view live. If the root
+is denied or disagrees, keep AUTO waiting; manual LIVE remains a separate explicit
+operator workflow and is not upgraded to autonomous proof.
+
+Regression fixtures reproduce 111 raw entries/one missing Path, four Vegas
+practice/qualifying paths, authenticated cache HIT with Age 2160, and Race-index
+403. A permitted matching root keyframe can verify; denied/stale/wrong/missing
+root metadata cannot. No actual authenticated LIVE or root success is claimed by
+these fixture tests. A web retrieval of the root was denied, but the actual Python probe subsequently
+retrieved it successfully (HTTP 200, cache HIT/Age 31 seconds) with the exact
+2026 Vegas Race path, session 11420, meeting 1300 and circuit 152. No token was
+available in that environment; the official root resource itself permitted the
+request. Authentication was not stripped or bypassed. This proves independent
+metadata retrieval, not authenticated LIVE telemetry or wall switching. The
+local probe still needs to establish access/identity agreement for the user.

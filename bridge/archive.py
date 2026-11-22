@@ -84,20 +84,22 @@ def response(path):
     url=safe_url(path)
     leaf=path.rsplit('/',1)[-1]
     index=leaf=='Index.json'
-    kind='year-index' if re.fullmatch(r'20\d{2}/Index.json',path) else 'session-index' if index else 'session-info' if 'SessionInfo' in leaf else 'archive-topic'
+    current=path=='SessionInfo.json'
+    revalidate=index or current
+    kind='current-session-info' if current else 'year-index' if re.fullmatch(r'20\d{2}/Index.json',path) else 'session-index' if index else 'session-info' if 'SessionInfo' in leaf else 'archive-topic'
     auth,renewed=headers()
     diagnostic={'endpointKind':kind,'sdkSharedAuth':True,'refreshAttempted':renewed,'attempts':[]}
     observed=_REQUEST_DIAGNOSTICS.get()
     if observed is not None and len(observed.setdefault('requests',[]))<16:observed['requests'].append(diagnostic)
     def get(authorization):
         # Match the working SDK client profile. Revalidate/bust only metadata
-        # indexes; clips and their bounded local caches retain existing behavior.
+        # indexes/current keyframe; bounded local clip caches retain existing behavior.
         outgoing={'User-Agent':'BestHTTP',**authorization}
-        if index:outgoing.update({'Cache-Control':'no-cache','Pragma':'no-cache'})
-        result=requests.get(url,headers=outgoing,params={'_f1dash':str(int(time.time())//30)} if index else None,
+        if revalidate:outgoing.update({'Cache-Control':'no-cache','Pragma':'no-cache'})
+        result=requests.get(url,headers=outgoing,params={'_f1dash':str(int(time.time())//30)} if revalidate else None,
                             stream=True,timeout=(10,30),allow_redirects=False)
         attempt={'httpStatus':result.status_code,'authorizationSent':bool(authorization.get('Authorization')),
-                 'cacheRevalidationRequested':index,'cacheBustRequested':index}
+                 'cacheRevalidationRequested':revalidate,'cacheBustRequested':revalidate}
         age=result.headers.get('Age','')
         if str(age).isdigit():attempt['cacheAgeSeconds']=min(int(age),604800)
         cache=str(result.headers.get('X-Cache','')).upper()

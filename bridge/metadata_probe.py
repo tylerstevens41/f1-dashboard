@@ -2,8 +2,9 @@
 import argparse
 import json
 import logging
+import time
 from .archive import list_sessions,request_diagnostics
-from .live_reconciliation import published_session_info
+from .live_reconciliation import published_session_info,provider_candidate
 from .diagnostics import safe_exception
 
 
@@ -29,13 +30,17 @@ def main():
     try:
         with request_diagnostics(identity):document=published_session_info(args.path)
         info=document['sessionInfo']
-        result['metadata']={'path':document['path'],'session':info.get('Name'),'sessionKey':info.get('Key'),
+        _,identity_error=provider_candidate({**info,'Path':document['path']},time.time())
+        result['identityFieldsValid']=identity_error is None
+        if identity_error:result['identityValidationError']=identity_error
+        result['metadata']={'path':document['path'],'matchesRequestedPath':document['path']==args.path,
+                            'source':document.get('source','session-archive'),'session':info.get('Name'),'sessionKey':info.get('Key'),
                             'meetingKey':info.get('Meeting',{}).get('Key'),'circuit':info.get('Meeting',{}).get('Circuit'),
                             'start':info.get('StartDate'),'gmtOffset':info.get('GmtOffset')}
     except Exception as exc:result['metadataError']=safe_exception(exc,'archive')
     result.update(indexRequests=index,metadataRequests=identity)
     print(json.dumps(result,indent=2))
-    return 1 if 'metadataError' in result else 0
+    return 1 if 'metadataError' in result or not result.get('metadata',{}).get('matchesRequestedPath') or not result.get('identityFieldsValid') else 0
 
 
 if __name__=='__main__':raise SystemExit(main())

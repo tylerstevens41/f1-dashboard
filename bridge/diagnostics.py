@@ -24,7 +24,7 @@ def safe_exception(exc, stage):
         winerror=getattr(exc,'winerror',None)
         if winerror in {5,32,33}:result['windowsErrorCode']=winerror
     code = getattr(exc, 'code', None)
-    if code in {'fastf1-telemetry-unavailable','fastf1-authentication-required','authentication-required','archive-access-denied','topic-unpublished','archive-http-error','download-limit','no-events','record-limit','invalid-clip-schema','invalid-event-schema','invalid-position-record-schema','invalid-stream-format','scan-limit','missing-required-stream','invalid-timing-schema','no-lap-timing-in-bounded-source','no-moving-gps-in-bounded-source'}:
+    if code in {'fastf1-telemetry-unavailable','fastf1-authentication-required','authentication-required','archive-access-denied','invalid-stream-path','topic-unpublished','archive-http-error','download-limit','no-events','record-limit','invalid-clip-schema','invalid-event-schema','invalid-position-record-schema','invalid-stream-format','scan-limit','missing-required-stream','invalid-timing-schema','no-lap-timing-in-bounded-source','no-moving-gps-in-bounded-source'}:
         result['code'] = code
     if getattr(exc,'formatKind',None) in {'html-or-markup','json-without-elapsed-prefix','quoted-without-elapsed-prefix','unsupported-prefix'}:
         result['formatKind']=exc.formatKind

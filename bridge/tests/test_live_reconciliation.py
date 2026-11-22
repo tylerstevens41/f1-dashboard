@@ -61,7 +61,7 @@ class ReconciliationTests(TestCase):
         cases=[]
         for key in ('Key','Name','StartDate','GmtOffset','Meeting'):
             value=confirmation();del value['sessionInfo'][key];cases.append(value)
-        for key,new in [('Key',99909),('Name','Qualifying'),('StartDate','2026-11-21T20:10:00'),('Path','2026/conflicting/Race/')]:
+        for key,new in [('Key',99909),('Key','J21R'),('Name','Qualifying'),('StartDate','2026-11-21T20:10:00'),('Path','2026/conflicting/Race/')]:
             value=confirmation();value['sessionInfo'][key]=new;cases.append(value)
         value=confirmation();value['sessionInfo']['Meeting']['Circuit']['Key']=99909;cases.append(value)
         value=confirmation();value['sessionInfo']['Meeting']['Key']=99909;cases.append(value)
@@ -225,7 +225,9 @@ class ReconciliationServiceTests(IsolatedAsyncioTestCase):
             check=service.snapshot()['providerIdentityCheck']
             self.assertEqual(check['error']['code'],'archive-access-denied')
             self.assertEqual(check['error']['httpStatus'],403)
-            self.assertTrue(check['requestDiagnostics']['requests'][0]['attempts'][0]['authorizationSent'])
+            requests=check['requestDiagnostics']['requests']
+            self.assertEqual([r['endpointKind'] for r in requests],['session-index','current-session-info'])
+            self.assertTrue(all(r['attempts'][0]['authorizationSent'] for r in requests))
             self.assertEqual(service.snapshot()['view'],'dashboard')
             self.assertNotIn('SYNTHETIC_SECRET',str(service.snapshot()))
             bridge.start_live.assert_not_awaited();await service.close()
@@ -248,3 +250,74 @@ class ReconciliationServiceTests(IsolatedAsyncioTestCase):
             self.assertTrue(service.snapshot()['providerIdentityCheck']['requestDiagnostics']['requests'][0]['refreshSucceeded'])
             self.assertNotIn('SYNTHETIC_',str(service.snapshot()))
             bridge.start_live.assert_not_awaited();await service.close()
+
+    async def test_reported_vegas_stale_index_and_denied_archive_can_use_current_keyframe(self):
+        from bridge.archive import list_sessions,request_diagnostics
+        class Reply:
+            def __init__(self,status,value,headers=None):
+                self.status_code=status;self.ok=status<400;self.headers=headers or {};self.data=json.dumps(value).encode()
+            def close(self):pass
+            def __enter__(self):return self
+            def __exit__(self,*_):pass
+            def iter_content(self,*_):yield self.data
+        kinds=['Practice 1','Practice 2','Practice 3','Qualifying','Race']
+        vegas={**info()['Meeting'],'Sessions':[{'Key':90000+i,'Name':kind,'StartDate':'2026-11-20T20:00:00','GmtOffset':'-08:00:00',
+                 'Path':None if kind=='Race' else VEGAS_PATH.replace('Race/',kind.replace(' ','_')+'/')} for i,kind in enumerate(kinds)]}
+        other={'Key':777,'Name':'Synthetic other','Sessions':[{'Key':70000+i,'Name':'Practice 1','Path':f'2026/SYNTHETIC/{i}/','StartDate':'2026-11-01T00:00:00Z'} for i in range(106)]}
+        replies=[Reply(200,{'Meetings':[vegas,other]},{'Age':'2160','X-Cache':'Hit from edge'}),Reply(403,{}),Reply(200,info())]
+        with tempfile.TemporaryDirectory() as temp,patch('bridge.archive_auth.headers',return_value=({'Authorization':'Bearer SYNTHETIC_ONLY'},False)),patch('bridge.archive.requests.get',side_effect=replies) as get:
+            index={}
+            with request_diagnostics(index):rows=list_sessions(2026)
+            self.assertEqual(index['rawSessionEntries'],111);self.assertEqual(index['entriesWithoutPath'],1)
+            self.assertEqual(len(rows),110);self.assertFalse(any(row['path']==VEGAS_PATH for row in rows))
+            self.assertEqual(index['requests'][0]['attempts'][0]['cacheAgeSeconds'],2160)
+            bridge,service=self.setup_bridge(temp);service.published=rows;service.index_diagnostics=index
+            await service.tick(NOW);await service.identity_task;await service.tick(NOW+1)
+            self.assertEqual(service.machine.state,'LIVE');self.assertEqual(service.snapshot()['view'],'live')
+            self.assertEqual(service.machine.reconciliation['source'],'current-session-keyframe')
+            self.assertEqual(get.call_args.args[0],'https://livetiming.formula1.com/static/SessionInfo.json')
+            self.assertEqual(get.call_args.kwargs['headers']['Authorization'],'Bearer SYNTHETIC_ONLY')
+            self.assertEqual(service.snapshot()['catalogDiagnostics']['feedPathEntries'],0)
+            bridge.start_live.assert_not_awaited();await service.close()
+
+    async def test_current_keyframe_wrong_identity_blocks_then_rechecks_after_publication(self):
+        class Reply:
+            def __init__(self,status,value):self.status_code=status;self.ok=status<400;self.headers={};self.data=json.dumps(value).encode()
+            def close(self):pass
+            def __enter__(self):return self
+            def __exit__(self,*_):pass
+            def iter_content(self,*_):yield self.data
+        previous=info();previous['Path']=VEGAS_PATH.replace('Race/','Qualifying/');previous['Name']='Qualifying'
+        replies=[Reply(403,{}),Reply(200,previous),Reply(403,{}),Reply(200,info())]
+        with tempfile.TemporaryDirectory() as temp,patch('bridge.archive_auth.headers',return_value=({'Authorization':'Bearer SYNTHETIC'},False)),patch('bridge.archive.requests.get',side_effect=replies):
+            bridge,service=self.setup_bridge(temp)
+            await service.tick(NOW);await service.identity_task;await service.tick(NOW+1)
+            self.assertEqual(service.snapshot()['view'],'dashboard');self.assertIsNone(bridge.live_expected)
+            self.assertEqual(service.machine.reconciliation['reason'],'provider-confirmation-path-conflict')
+            bridge.state.topics['Position.z']['1']['_sampleTimeMs']=(NOW+61)*1000
+            await service.tick(NOW+61);await service.identity_task;await service.tick(NOW+62)
+            self.assertEqual(service.machine.state,'LIVE');bridge.start_live.assert_not_awaited()
+            await service.close()
+
+    async def test_current_keyframe_requires_its_own_path_and_never_invents_one(self):
+        document=info();del document['Path']
+        with patch('bridge.live_reconciliation.archived_session_info',side_effect=ArchiveUnavailable('denied',code='archive-access-denied')),patch('bridge.archive.small_json',return_value=document):
+            with self.assertRaises(ValueError):published_session_info(VEGAS_PATH)
+        current={**confirmation(),'source':'current-session-keyframe'}
+        for mutation in ('circuit','year','date'):
+            value=info()
+            if mutation=='circuit':value['Meeting']['Circuit']['Key']=99904
+            elif mutation=='year':value['Path']=value['Path'].replace('2026','2025')
+            else:value['StartDate']='2026-11-20T20:00:00'
+            self.assertIsNone(reconcile(NOW,advice(),observation(),{**current,'path':value['Path'],'sessionInfo':value})[0])
+
+    async def test_observed_public_vegas_identity_subset_can_corroborate_simulated_feed(self):
+        # Actual public root identity observed 2026-11-22; feed/GPS still simulated.
+        document=info();document.update(Key=11420,Type='Race')
+        document['Meeting']['Key']=1300;document['Meeting']['Circuit']['Key']=152
+        live=observation();live['session']=json.loads(json.dumps(document))
+        result,check=reconcile(NOW,advice(),live,{'path':VEGAS_PATH,'sessionInfo':document,'source':'current-session-keyframe'})
+        self.assertEqual(result['sessionKey'],11420);self.assertEqual(result['circuit']['Key'],152)
+        self.assertEqual(check['source'],'current-session-keyframe')
+        live.update(freshGps=False,freshDelta=False)
+        self.assertIsNone(reconcile(NOW,advice(),live,{'path':VEGAS_PATH,'sessionInfo':document,'source':'current-session-keyframe'})[0])
